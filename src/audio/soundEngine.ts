@@ -325,6 +325,39 @@ export class SoundEngine {
     osc.stop(now + (kind === 'heavy' ? 0.38 : 0.2));
   }
 
+  public playTrafficHornBurst(kind: 'heavy' | 'light', bursts = 2): void {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const count = Math.max(1, Math.min(3, bursts));
+    const base = kind === 'heavy' ? 168 : 610;
+    const dur = kind === 'heavy' ? 0.14 : 0.095;
+    const step = kind === 'heavy' ? 0.2 : 0.145;
+
+    for (let i = 0; i < count; i++) {
+      const start = now + i * step;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+
+      osc.type = kind === 'heavy' ? 'sawtooth' : 'square';
+      osc.frequency.setValueAtTime(base * (i === count - 1 ? 1.07 : 1), start);
+
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.exponentialRampToValueAtTime(kind === 'heavy' ? 0.072 : 0.048, start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+
+      filter.type = 'lowpass';
+      filter.frequency.value = 1150;
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + dur + 0.015);
+    }
+  }
+
   public playCrash(heavy = false): void {
     const ctx = this.ensureContext();
     if (!ctx) return;
