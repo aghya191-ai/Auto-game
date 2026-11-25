@@ -1253,7 +1253,11 @@ export function createPedestrianModel(shirtHex: string, isWaitingPassenger = fal
   return { group, leftLeg, rightLeg, leftArm, rightArm, alertBadge };
 }
 
-export function createRoadDivider(length: number, maxAnisotropy = 1): THREE.Group {
+export function createRoadDivider(
+  length: number,
+  maxAnisotropy = 1,
+  includeFoliage = true
+): THREE.Group {
   const group = new THREE.Group();
   const curbSideMat = new THREE.MeshStandardMaterial({
     map: createMedianCurbTexture(maxAnisotropy),
@@ -1263,9 +1267,6 @@ export function createRoadDivider(length: number, maxAnisotropy = 1): THREE.Grou
     map: createMedianTopTexture(maxAnisotropy),
     roughness: 0.78,
   });
-  const shrubMat = new THREE.MeshStandardMaterial({ color: '#1b6d20', roughness: 0.85, flatShading: true });
-  const trunkMat = new THREE.MeshStandardMaterial({ color: '#5c3a21', roughness: 0.9 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: '#2b7a22', roughness: 0.76, flatShading: true });
 
   // Black-and-yellow striped concrete median curb with tiled top & curb borders
   const curbBody = new THREE.Mesh(new THREE.BoxGeometry(1.06, 0.28, length), [
@@ -1281,27 +1282,30 @@ export function createRoadDivider(length: number, maxAnisotropy = 1): THREE.Grou
   curbBody.castShadow = true;
   group.add(curbBody);
 
-  // Closely spaced faceted shrub domes & low-poly trees along median (matching screenshot!)
-  const spacing = 2.4;
-  const count = Math.floor(length / spacing);
-  for (let i = 0; i < count; i++) {
-    const z = -length / 2 + 1.3 + i * spacing;
-    if (i % 4 === 1) {
-      // Faceted low-poly tree on median
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.16, 2.45, 6), trunkMat);
-      trunk.position.set(0, 1.4, z);
-      trunk.castShadow = true;
-      const crown = new THREE.Mesh(new THREE.DodecahedronGeometry(1.2, 0), leafMat);
-      crown.position.set(0, 3.05, z);
-      crown.scale.set(1.06, 0.94, 1.06);
-      crown.castShadow = true;
-      group.add(trunk, crown);
-    } else {
-      // Faceted low-poly shrub dome
-      const bush = new THREE.Mesh(new THREE.DodecahedronGeometry(0.32, 0), shrubMat);
-      bush.position.set(0, 0.42, z);
-      bush.scale.set(1.15, 0.75, 1.15);
-      group.add(bush);
+  if (includeFoliage) {
+    const shrubMat = new THREE.MeshStandardMaterial({ color: '#1b6d20', roughness: 0.85, flatShading: true });
+    const trunkMat = new THREE.MeshStandardMaterial({ color: '#5c3a21', roughness: 0.9 });
+    const leafMat = new THREE.MeshStandardMaterial({ color: '#2b7a22', roughness: 0.76, flatShading: true });
+
+    const spacing = 2.4;
+    const count = Math.floor(length / spacing);
+    for (let i = 0; i < count; i++) {
+      const z = -length / 2 + 1.3 + i * spacing;
+      if (i % 4 === 1) {
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.16, 2.45, 6), trunkMat);
+        trunk.position.set(0, 1.4, z);
+        trunk.castShadow = true;
+        const crown = new THREE.Mesh(new THREE.DodecahedronGeometry(1.2, 0), leafMat);
+        crown.position.set(0, 3.05, z);
+        crown.scale.set(1.06, 0.94, 1.06);
+        crown.castShadow = true;
+        group.add(trunk, crown);
+      } else {
+        const bush = new THREE.Mesh(new THREE.DodecahedronGeometry(0.32, 0), shrubMat);
+        bush.position.set(0, 0.42, z);
+        bush.scale.set(1.15, 0.75, 1.15);
+        group.add(bush);
+      }
     }
   }
 

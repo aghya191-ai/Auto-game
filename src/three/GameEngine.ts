@@ -25,19 +25,14 @@ import type {
 import { SoundEngine } from '../audio/soundEngine';
 import {
   createAreaGantry,
-  createBillboardModel,
-  createBuildingModel,
   createCngModel,
   createCockpitModel,
   createFlyoverPillar,
   createOverheadRoadSign,
   createPedestrianModel,
   createRoadDivider,
-  createRoadsideStall,
   createStreetLight,
   createTrafficLightModel,
-  createTreeModel,
-  createUtilityPoleCluster,
   createVehicleModel,
   createZonePad,
   type CngRig,
@@ -46,6 +41,7 @@ import {
   type TrafficLightRig,
   type TrafficModelRig,
 } from './models';
+import { StreetDressingManager } from './streetDressing';
 import {
   createLightGlowTexture,
   createMedianCurbTexture,
@@ -70,8 +66,10 @@ const LANES = [-6.0, -2.8, 2.8, 6.0];
 const RAIN_COUNT = 340;
 
 interface RoadChunk {
+  chunkIndex: number;
   group: THREE.Group;
   sceneryGroup: THREE.Group;
+  signGroup: THREE.Group;
   flyoverPillar: THREE.Group;
   hasDivider: boolean;
   builtAreaIndex: number;
@@ -180,6 +178,7 @@ export class GameEngine {
 
   private cngRig!: CngRig;
   private cockpitRig!: CockpitRig;
+  private streetDressing!: StreetDressingManager;
   private roadChunks: RoadChunk[] = [];
   private traffic: TrafficEntity[] = [];
   private pedestrians: PedestrianEntity[] = [];
@@ -255,7 +254,6 @@ export class GameEngine {
   private distMissionAccum = 0;
   private gasZoneSoundCooldown = 0;
   private orbitAngle = 0;
-  private billboardCounter = 0;
   private startAreaIndex = 0;
 
   private frameId = 0;
@@ -522,6 +520,8 @@ export class GameEngine {
     this.rainLines.frustumCulled = false;
     this.scene.add(this.rainLines);
 
+    this.streetDressing = new StreetDressingManager(this.scene, this.maxAnisotropy);
+
     const CHUNK_LEN = 45;
     const CHUNK_COUNT = 6;
     const curbEdgeGeo = new THREE.BoxGeometry(0.36, 0.3, CHUNK_LEN);
@@ -554,22 +554,17 @@ export class GameEngine {
 
       chunkGroup.add(roadMesh, leftWalk, rightWalk, leftCurb, rightCurb);
 
-      // Center median divider with intersection gap at zebra crossings so player can weave two-way!
+      // Center median divider curb (median trees & bushes rendered by StreetDressingManager InstancedMesh)
       const hasDivider = !hasZebra;
       if (hasDivider) {
-        const divider = createRoadDivider(36, this.maxAnisotropy);
+        const divider = createRoadDivider(36, this.maxAnisotropy, false);
         divider.position.set(0, 0, -2);
         chunkGroup.add(divider);
       } else {
-        // Shorter divider segment leaving wide zebra intersection gap
-        const divider = createRoadDivider(20, this.maxAnisotropy);
+        const divider = createRoadDivider(20, this.maxAnisotropy, false);
         divider.position.set(0, 0, 10);
         chunkGroup.add(divider);
       }
-
-      // Utility poles (খাম্বা) & tangled overhead black electric cables
-      const polesAndWires = createUtilityPoleCluster(i % 2 === 0);
-      chunkGroup.add(polesAndWires);
 
       // Street lights on both sidewalks with shared bloom-like glow & ground pool
       const lightL = createStreetLight(-1, this.streetBulbMat, this.streetGlowMat, this.streetPoolMat);
@@ -578,28 +573,36 @@ export class GameEngine {
       lightR.position.set(9.4, 0, 14);
       chunkGroup.add(lightL, lightR);
 
-      // Dynamic area-themed buildings, stalls & overhead road signs container
+      // Pooled buildings, shops, banners, posters, footbridges & utility wires container
       const sceneryGroup = new THREE.Group();
       chunkGroup.add(sceneryGroup);
+      this.streetDressing.initChunkPool(i, sceneryGroup);
+
+      // Overhead directional sign container
+      const signGroup = new THREE.Group();
+      chunkGroup.add(signGroup);
 
       const flyoverPillar = createFlyoverPillar();
       flyoverPillar.visible = Boolean(startArea.hasFlyover) && i % 2 === 0;
       chunkGroup.add(flyoverPillar);
 
       const chunk: RoadChunk = {
+        chunkIndex: i,
         group: chunkGroup,
         sceneryGroup,
+        signGroup,
         flyoverPillar,
         hasDivider,
         builtAreaIndex: -1,
         z: 30 - i * CHUNK_LEN,
       };
-      this.rebuildChunkScenery(chunk, i, CHUNK_LEN);
+      this.rebuildChunkScenery(chunk, i);
 
       chunkGroup.position.z = chunk.z;
       this.scene.add(chunkGroup);
       this.roadChunks.push(chunk);
     }
+    this.streetDressing.syncChunkTransforms(this.roadChunks, this.graphicsQuality);
 
     this.cngRig = createCngModel(
       this.equippedColorHex,
@@ -636,66 +639,25 @@ export class GameEngine {
     }
   }
 
-  private rebuildChunkScenery(chunk: RoadChunk, seedIdx: number, chunkLen: number): void {
-    this.disposeGroupChildren(chunk.sceneryGroup);
+  private rebuildChunkScenery(chunk: RoadChunk, seedIdx: number): void {
+    this.disposeGroupChildren(chunk.signGroup);
     const area = AREAS[this.areaIndex];
     chunk.builtAreaIndex = this.areaIndex;
     chunk.flyoverPillar.visible = Boolean(area.hasFlyover) && seedIdx % 2 === 0;
 
-    const signColors = ['#065f46', '#991b1b', '#1e40af', '#92400e', '#6b21a8'];
+    this.streetDressing.populateChunk(
+      chunk.chunkIndex,
+      seedIdx,
+      area,
+      chunk.hasDivider,
+      this.graphicsQuality
+    );
 
-    [-1, 1].forEach((side) => {
-      for (let slot = 0; slot < 2; slot++) {
-        const zOff = (slot - 0.5) * (chunkLen * 0.5);
-        const w = 6.5 + slot * 1.2;
-        const h = 8.4 + ((seedIdx + slot + (side > 0 ? 1 : 0)) % 4) * 3.0;
-        const d = 15.0;
-        const color = area.buildingPalette[(seedIdx + slot) % area.buildingPalette.length];
-        const shop = area.shopNames[(seedIdx + slot + (side > 0 ? 1 : 0)) % area.shopNames.length];
-        const signCol = signColors[(seedIdx + slot) % signColors.length];
-
-        const bldg = createBuildingModel(
-          color,
-          w,
-          h,
-          d,
-          shop,
-          signCol,
-          this.maxAnisotropy,
-          side === -1 ? 1 : -1,
-          area.buildingStyle,
-          seedIdx + slot + (side > 0 ? 2 : 0)
-        );
-        bldg.position.set(side * (15.4 + w / 2 - 2.2), 0, zOff);
-        chunk.sceneryGroup.add(bldg);
-      }
-
-      // Roadside vendor stall / fruit table with umbrella on sidewalk
-      if ((seedIdx + (side > 0 ? 1 : 0)) % 2 === 0) {
-        const stall = createRoadsideStall(seedIdx + (side > 0 ? 1 : 0), this.maxAnisotropy);
-        stall.position.set(side * 10.6, 0.16, (seedIdx % 2 === 0 ? -1 : 1) * 7.5);
-        if (side === -1) stall.rotation.y = Math.PI;
-        chunk.sceneryGroup.add(stall);
-      }
-
-      const tree = createTreeModel();
-      tree.position.set(side * 11.4, 0.16, (seedIdx % 2 === 0 ? 1 : -1) * 11);
-      chunk.sceneryGroup.add(tree);
-    });
-
-    // Overhead green directional road sign + signal on odd chunks (like Screenshot 1 & 3)
+    // Overhead green directional road sign + signal on odd chunks (clear of footbridges & utility poles)
     if (seedIdx % 2 === 1) {
       const sign = createOverheadRoadSign(area.name, this.maxAnisotropy);
-      sign.position.set(0, 0, -10);
-      chunk.sceneryGroup.add(sign);
-    }
-
-    // Highway Billboard every 2nd chunk
-    if (seedIdx % 2 === 0) {
-      const side: -1 | 1 = this.billboardCounter % 2 === 0 ? 1 : -1;
-      const bb = createBillboardModel(this.billboardCounter++, this.maxAnisotropy, side);
-      bb.position.set(side * 11.4, 0, -2);
-      chunk.sceneryGroup.add(bb);
+      sign.position.set(0, 0, -15);
+      chunk.signGroup.add(sign);
     }
   }
 
@@ -829,8 +791,9 @@ export class GameEngine {
     if (this.phase === 'menu') {
       this.areaIndex = this.startAreaIndex;
       this.roadChunks.forEach((chunk, i) => {
-        this.rebuildChunkScenery(chunk, i, 45);
+        this.rebuildChunkScenery(chunk, i);
       });
+      this.streetDressing.syncChunkTransforms(this.roadChunks, this.graphicsQuality);
     }
   }
 
@@ -928,6 +891,7 @@ export class GameEngine {
       0,
       isHigh ? RAIN_COUNT * 2 : Math.floor(RAIN_COUNT * 0.45) * 2
     );
+    this.streetDressing?.applyQuality(quality);
     this.emitHud();
   }
 
@@ -1055,8 +1019,9 @@ export class GameEngine {
 
     const firstArea = AREAS[this.areaIndex];
     this.roadChunks.forEach((chunk, idx) => {
-      this.rebuildChunkScenery(chunk, idx, 45);
+      this.rebuildChunkScenery(chunk, idx);
     });
+    this.streetDressing.syncChunkTransforms(this.roadChunks, this.graphicsQuality);
 
     this.spawnAreaGantry(firstArea.name, firstArea.tagline, firstArea.accentColor, -75);
     this.callbacks.onAreaEnter(firstArea.name, firstArea.tagline, 1);
@@ -1812,7 +1777,7 @@ export class GameEngine {
       if (chunk.z > 55) {
         chunk.z -= TOTAL_ROAD_LEN;
         if (chunk.builtAreaIndex !== this.areaIndex) {
-          this.rebuildChunkScenery(chunk, idx + Math.floor(this.distanceMeters / 45), 45);
+          this.rebuildChunkScenery(chunk, idx + Math.floor(this.distanceMeters / 45));
         }
       }
       chunk.group.position.z = chunk.z;
@@ -1837,6 +1802,7 @@ export class GameEngine {
         }
       }
     }
+    this.streetDressing.syncChunkTransforms(this.roadChunks, this.graphicsQuality);
 
     // Move gantries
     for (let i = this.gantries.length - 1; i >= 0; i--) {
@@ -2471,6 +2437,7 @@ export class GameEngine {
     window.removeEventListener('pointercancel', this.onPointerUp);
 
     this.sound.dispose();
+    this.streetDressing?.dispose();
 
     this.roadBumpPlain?.dispose();
     this.roadBumpZebra?.dispose();

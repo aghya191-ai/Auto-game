@@ -189,14 +189,192 @@ export const BILLBOARD_ADS: { title: string; subtitle: string; bg: string; fg: s
     bg: '#4c1d95',
     fg: '#f5d0fe',
   },
+  {
+    title: 'মেগা ঈদ শপিং উৎসব!',
+    subtitle: 'নিউমার্কেট ও জিএসি শাখায় ৫০% পর্যন্ত মূল্যছাড়',
+    bg: '#9d174d',
+    fg: '#fde047',
+  },
 ];
 
-export const WALL_POSTERS: { text: string; bg: string; fg: string }[] = [
-  { text: 'টিউশনি চাই (ক্লাস ১-১০)', bg: '#fef08a', fg: '#1c1917' },
-  { text: 'রং মিস্ত্রি ও প্লাম্বার', bg: '#fecaca', fg: '#7f1d1d' },
-  { text: 'হাতে লেখা সুন্দর করুন', bg: '#bfdbfe', fg: '#1e3a8a' },
-  { text: 'বাসা ভাড়া দেওয়া হবে', bg: '#bbf7d0', fg: '#14532d' },
-  { text: 'জরুরি রক্তের প্রয়োজন', bg: '#fee2e2', fg: '#991b1b' },
+export const WALL_POSTERS: { text: string; sub: string; bg: string; fg: string; badge: string }[] = [
+  { text: 'চাঁটগাঁ এক্সপ্রেস', sub: 'ঈদের সুপারহিট অ্যাকশন ছবি · চলছে', bg: '#7f1d1d', fg: '#fde047', badge: 'সিনেমা' },
+  { text: 'ভর্তি চলছে!', sub: 'ন্যাশনাল মডেল স্কুল (নার্সারি-দশম)', bg: '#1e3a8a', fg: '#ffffff', badge: 'ভর্তি' },
+  { text: 'ধামাকা সেল ৫০%', sub: 'সব কাপড় ও জুতায় বিশেষ মূল্যছাড়', bg: '#b45309', fg: '#fef9c3', badge: 'অফার' },
+  { text: 'কর্ণফুলীর টাইগার', sub: 'মেগা অ্যাকশন ফিল্ম · শুক্র ও শনি', bg: '#4c1d95', fg: '#f5d0fe', badge: 'ফিল্ম' },
+  { text: 'স্কলার্স কোচিং', sub: 'বিজ্ঞান ও গণিত বিশেষ ব্যাচ ভর্তি', bg: '#065f46', fg: '#ecfdf5', badge: 'কোচিং' },
+  { text: '২ কিনলে ১ ফ্রি!', sub: 'নিউমার্কেট ফ্যাশন মেলা — সীমিত সময়', bg: '#be123c', fg: '#fef08a', badge: 'সেল' },
+  { text: 'রাস্তার রাজা', sub: 'ব্লকবাস্টার বাংলা ছায়াছবি · শীঘ্রই আসছে', bg: '#0f172a', fg: '#38bdf8', badge: 'মুভি' },
+  { text: 'কম্পিউটার প্রশিক্ষণ', sub: 'গ্রাফিক্স ও ওয়েব কোর্সে ৩০% ছাড়', bg: '#0369a1', fg: '#fef08a', badge: 'ভর্তি' },
+];
+
+export type ShopCategoryId =
+  | 'pharmacy'
+  | 'tea_stall'
+  | 'mobile_shop'
+  | 'tailor'
+  | 'sweets'
+  | 'hardware'
+  | 'clinic'
+  | 'coaching';
+
+export interface ShopPreset {
+  category: ShopCategoryId;
+  label: string;
+  name: string;
+  bgHex: string;
+  awningHex: string;
+  crateColors: [string, string, string];
+}
+
+export const SHOP_CATALOG: ShopPreset[] = [
+  {
+    category: 'pharmacy',
+    label: 'ফার্মেসি',
+    name: 'হিলভিউ ফার্মেসি · ২৪ ঘণ্টা',
+    bgHex: '#047857',
+    awningHex: '#10b981',
+    crateColors: ['#f8fafc', '#10b981', '#e2e8f0'],
+  },
+  {
+    category: 'tea_stall',
+    label: 'চায়ের দোকান',
+    name: 'বন্দর চা-নাস্তা ও সিঙ্গারা ঘর',
+    bgHex: '#92400e',
+    awningHex: '#ea580c',
+    crateColors: ['#fbbf24', '#78350f', '#dc2626'],
+  },
+  {
+    category: 'mobile_shop',
+    label: 'মোবাইল শপ',
+    name: 'ফ্লাইওভার টেলিকম ও মোবাইল',
+    bgHex: '#0369a1',
+    awningHex: '#06b6d4',
+    crateColors: ['#38bdf8', '#fde047', '#1e293b'],
+  },
+  {
+    category: 'tailor',
+    label: 'দর্জি ঘর',
+    name: 'মদিনা ফ্যাশন ও টেইলার্স',
+    bgHex: '#6d28d9',
+    awningHex: '#a855f7',
+    crateColors: ['#f472b6', '#c084fc', '#fef08a'],
+  },
+  {
+    category: 'sweets',
+    label: 'মিষ্টির দোকান',
+    name: 'স্বপ্ননীড় মিষ্টান্ন ভান্ডার',
+    bgHex: '#b91c1c',
+    awningHex: '#f59e0b',
+    crateColors: ['#fde047', '#fb923c', '#fef2f2'],
+  },
+  {
+    category: 'hardware',
+    label: 'হার্ডওয়্যার',
+    name: 'কালুরঘাট স্টিল ও হার্ডওয়্যার',
+    bgHex: '#334155',
+    awningHex: '#eab308',
+    crateColors: ['#94a3b8', '#facc15', '#475569'],
+  },
+  {
+    category: 'clinic',
+    label: 'ক্লিনিক',
+    name: 'সবুজ বাংলা ক্লিনিক ও ডায়াগনস্টিক',
+    bgHex: '#1d4ed8',
+    awningHex: '#dc2626',
+    crateColors: ['#ffffff', '#38bdf8', '#ef4444'],
+  },
+  {
+    category: 'coaching',
+    label: 'কোচিং সেন্টার',
+    name: 'সাফল্য কোচিং একাডেমি · ভর্তি',
+    bgHex: '#b45309',
+    awningHex: '#2563eb',
+    crateColors: ['#facc15', '#3b82f6', '#ffffff'],
+  },
+  {
+    category: 'pharmacy',
+    label: 'মেডিকেল হল',
+    name: 'কর্ণফুলী মেডিকেল হল ও ওষুধ',
+    bgHex: '#065f46',
+    awningHex: '#16a34a',
+    crateColors: ['#ecfdf5', '#22c55e', '#cbd5e1'],
+  },
+  {
+    category: 'tea_stall',
+    label: 'টি স্টল',
+    name: 'মামা-ভাগিনা গরম চা কর্নার',
+    bgHex: '#7c2d12',
+    awningHex: '#dc2626',
+    crateColors: ['#fde047', '#9a3412', '#f97316'],
+  },
+  {
+    category: 'mobile_shop',
+    label: 'রিচার্জ শপ',
+    name: 'জিএসি মোবাইল সার্ভিসিং সেন্টার',
+    bgHex: '#0f766e',
+    awningHex: '#0284c7',
+    crateColors: ['#2dd4bf', '#fde047', '#334155'],
+  },
+  {
+    category: 'sweets',
+    label: 'বেকারি ও দই',
+    name: 'চাঁটগাঁ দই-মিষ্টি ও বেকারি',
+    bgHex: '#9f1239',
+    awningHex: '#f97316',
+    crateColors: ['#fecdd3', '#fde047', '#fb923c'],
+  },
+];
+
+export const HANGING_BANNERS: { title: string; subtitle: string; bg: string; fg: string }[] = [
+  {
+    title: 'মহা মূল্যছাড়! ৫০% সেল',
+    subtitle: 'শীত ও ঈদের পোশাকে বিশাল ছাড় · নিউমার্কেট',
+    bg: '#dc2626',
+    fg: '#fef08a',
+  },
+  {
+    title: 'ভর্তি চলছে! প্লে থেকে দশম',
+    subtitle: 'চট্টগ্রাম প্রভাতি মডেল স্কুল · আজই যোগাযোগ করুন',
+    bg: '#1e40af',
+    fg: '#ffffff',
+  },
+  {
+    title: 'ঈদের মেগা ছবি: রাস্তার রাজা',
+    subtitle: 'চলছে আলমাস ও ঝুমুর সিনেমা হলে — প্রতিদিন ৪ শো',
+    bg: '#581c87',
+    fg: '#fde047',
+  },
+  {
+    title: 'SSC ও HSC স্পেশাল ব্যাচ',
+    subtitle: 'সাফল্য কোচিং একাডেমি · ১০০% কেয়ার ও মডেল টেস্ট',
+    bg: '#065f46',
+    fg: '#fef9c3',
+  },
+  {
+    title: 'বাম্পার অফার · বাই ১ গেট ১',
+    subtitle: 'জুতা ও ব্যাগ মেলা — সীমিত সময়ের জন্য',
+    bg: '#b45309',
+    fg: '#ffffff',
+  },
+  {
+    title: 'সুপারহিট ফিল্ম: চাঁটগাঁর হিরো',
+    subtitle: 'পুরো পরিবার নিয়ে দেখুন — বিশাল পর্দায়',
+    bg: '#991b1b',
+    fg: '#fde047',
+  },
+  {
+    title: 'ফ্রি হেলথ ক্যাম্প · শুক্রবার',
+    subtitle: 'সবুজ বাংলা ক্লিনিক ও ডায়াগনস্টিক সেন্টার',
+    bg: '#0369a1',
+    fg: '#ffffff',
+  },
+  {
+    title: 'স্কুল ভর্তি ও বই মেলা',
+    subtitle: 'আন্দরকিল্লা পুস্তক ভবন · ২০% ডিসকাউন্ট',
+    bg: '#0f766e',
+    fg: '#fef08a',
+  },
 ];
 
 export const CNG_COLORS: CngColorOption[] = [

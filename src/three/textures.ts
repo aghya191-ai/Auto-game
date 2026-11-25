@@ -527,64 +527,130 @@ export function createLightGlowTexture(): THREE.CanvasTexture {
 export function createBuildingFacadeTexture(
   baseHex: string,
   style: 'brick' | 'concrete' | 'louver' | 'modern',
-  maxAnisotropy: number
+  maxAnisotropy: number,
+  floors = 6,
+  seed = 1
 ): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 512;
   const ctx = canvas.getContext('2d')!;
+  const rng = makeRng(seed * 4099 + floors * 131);
 
   ctx.fillStyle = baseHex;
   ctx.fillRect(0, 0, 256, 512);
 
   if (style === 'brick') {
-    ctx.fillStyle = 'rgba(120, 40, 25, 0.18)';
-    for (let y = 0; y < 440; y += 14) {
+    ctx.fillStyle = 'rgba(115, 38, 22, 0.24)';
+    for (let y = 0; y < 434; y += 12) {
       ctx.fillRect(0, y, 256, 2);
-      const off = ((y / 14) % 2) * 16;
+      const off = ((y / 12) % 2) * 16;
       for (let x = off; x < 256; x += 32) {
-        ctx.fillRect(x, y, 2, 14);
+        ctx.fillRect(x, y, 2, 12);
       }
     }
   } else if (style === 'louver') {
-    // Iconic vertical green/white louver slats seen on right side of reference screenshot
-    ctx.fillStyle = '#e2e8f0';
-    ctx.fillRect(0, 0, 256, 440);
-    ctx.fillStyle = '#16a34a';
-    for (let x = 6; x < 256; x += 16) {
-      ctx.fillRect(x, 0, 9, 430);
+    ctx.fillStyle = '#dce4ec';
+    ctx.fillRect(0, 0, 256, 434);
+    ctx.fillStyle = seed % 2 === 0 ? '#15803d' : '#0369a1';
+    for (let x = 6; x < 256; x += 15) {
+      ctx.fillRect(x, 0, 8, 430);
+    }
+  } else if (style === 'modern') {
+    // Subtle vertical concrete/glass bands
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.08)';
+    for (let x = 16; x < 256; x += 62) {
+      ctx.fillRect(x, 0, 44, 432);
     }
   }
 
-  // Upper floor windows grid
-  for (let row = 0; row < 5; row++) {
-    const wy = 44 + row * 78;
-    for (let col = 0; col < 4; col++) {
-      const wx = 20 + col * 58;
-      // Window frame
+  // Monsoon water stains & damp streaks dripping down from parapet & ledges
+  for (let i = 0; i < 16; i++) {
+    const sx = rng() * 246;
+    const sy = rng() < 0.45 ? 0 : 30 + rng() * 280;
+    const sw = 8 + rng() * 22;
+    const sh = 42 + rng() * 140;
+    const grad = ctx.createLinearGradient(sx, sy, sx, sy + sh);
+    grad.addColorStop(0, 'rgba(34, 30, 24, 0.42)');
+    grad.addColorStop(0.55, 'rgba(48, 44, 34, 0.22)');
+    grad.addColorStop(1, 'rgba(48, 44, 34, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(sx, sy, sw, sh);
+  }
+
+  // Peeling paint & spalling plaster patches showing raw brick/concrete beneath
+  const peelCount = style === 'modern' ? 3 : 8;
+  for (let i = 0; i < peelCount; i++) {
+    const px = 14 + rng() * 210;
+    const py = 18 + rng() * 380;
+    const pw = 16 + rng() * 32;
+    const ph = 14 + rng() * 28;
+    // Curled pale paint lip
+    ctx.fillStyle = 'rgba(255, 250, 235, 0.55)';
+    ctx.beginPath();
+    ctx.ellipse(px + 2, py + 2, pw * 0.56, ph * 0.56, rng() * 0.8, 0, Math.PI * 2);
+    ctx.fill();
+    // Exposed grey plaster or brick core
+    ctx.fillStyle = style === 'brick' || rng() > 0.45 ? '#6b3e30' : '#52525b';
+    ctx.beginPath();
+    ctx.ellipse(px, py, pw * 0.46, ph * 0.46, rng() * 0.8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 4-9 upper floors windows grid
+  const clampedFloors = Math.max(4, Math.min(9, floors));
+  const upperFloors = clampedFloors - 1;
+  const upperBandH = 418;
+  const floorH = upperBandH / upperFloors;
+  const winH = Math.min(40, Math.max(20, floorH * 0.58));
+  const cols = 4;
+
+  for (let row = 0; row < upperFloors; row++) {
+    const wy = 14 + row * floorH + (floorH - winH) * 0.4;
+    // Floor cornice / ledge line
+    ctx.fillStyle = 'rgba(30, 41, 59, 0.22)';
+    ctx.fillRect(0, 12 + row * floorH, 256, 3);
+
+    for (let col = 0; col < cols; col++) {
+      const wx = 18 + col * 58;
+      // Rainwater drip smudge directly beneath window sill
+      const dripGrad = ctx.createLinearGradient(wx, wy + winH, wx, wy + winH + 18);
+      dripGrad.addColorStop(0, 'rgba(30, 27, 24, 0.34)');
+      dripGrad.addColorStop(1, 'rgba(30, 27, 24, 0)');
+      ctx.fillStyle = dripGrad;
+      ctx.fillRect(wx + 2, wy + winH, 32, 18);
+
+      // Frame
       ctx.fillStyle = '#e2e8f0';
-      ctx.fillRect(wx - 2, wy - 2, 40, 46);
-      // Glass pane (mix of dark interior & subtle lit reflection)
-      const lit = (row * 3 + col) % 5 === 0;
+      ctx.fillRect(wx - 2, wy - 2, 38, winH + 4);
+      // Glass pane
+      const lit = (row * 3 + col + seed) % 5 === 0;
       ctx.fillStyle = lit ? '#bae6fd' : style === 'modern' ? '#0f172a' : '#1e293b';
-      ctx.fillRect(wx, wy, 36, 42);
-      // Window cross-bar
+      ctx.fillRect(wx, wy, 34, winH);
+      // Crossbar / grille
       ctx.fillStyle = '#cbd5e1';
-      ctx.fillRect(wx + 17, wy, 2, 42);
-      ctx.fillRect(wx, wy + 20, 36, 2);
+      ctx.fillRect(wx + 16, wy, 2, winH);
+      ctx.fillRect(wx, wy + winH * 0.48, 34, 2);
     }
   }
 
-  // Ground-floor rolling shop shutters
-  ctx.fillStyle = '#334155';
+  // Ground-floor rolling shop shutters & dark shop interior band
+  ctx.fillStyle = '#1f2937';
   ctx.fillRect(0, 428, 256, 84);
   for (let s = 0; s < 3; s++) {
     const sx = 12 + s * 80;
-    ctx.fillStyle = s === 1 ? '#1e293b' : '#94a3b8';
-    ctx.fillRect(sx, 438, 68, 74);
-    ctx.fillStyle = '#64748b';
-    for (let ly = 444; ly < 510; ly += 8) {
+    const isHalfOpen = (s + seed) % 3 === 1;
+    const shutterH = isHalfOpen ? 36 : 74;
+    ctx.fillStyle = isHalfOpen ? '#94a3b8' : '#64748b';
+    ctx.fillRect(sx, 436, 68, shutterH);
+    ctx.fillStyle = '#334155';
+    for (let ly = 442; ly < 436 + shutterH; ly += 7) {
       ctx.fillRect(sx + 2, ly, 64, 2);
+    }
+    if (isHalfOpen) {
+      // Warm lit interior glimpse beneath half-raised shutter
+      ctx.fillStyle = '#fef3c7';
+      ctx.fillRect(sx + 4, 474, 60, 34);
     }
   }
 
@@ -733,7 +799,8 @@ export function createAreaSignTexture(
 export function createShopSignTexture(
   shopName: string,
   bgHex: string,
-  maxAnisotropy: number
+  maxAnisotropy: number,
+  categoryBadge?: string
 ): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
@@ -746,11 +813,21 @@ export function createShopSignTexture(
   ctx.lineWidth = 6;
   ctx.strokeRect(6, 6, 500, 116);
 
+  if (categoryBadge) {
+    ctx.fillStyle = '#facc15';
+    ctx.fillRect(14, 14, 118, 28);
+    ctx.fillStyle = '#1c1917';
+    ctx.font = `800 18px ${FONT_STACK}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(categoryBadge, 73, 29);
+  }
+
   ctx.fillStyle = '#ffffff';
-  ctx.font = `700 40px ${FONT_STACK}`;
+  ctx.font = `800 36px ${FONT_STACK}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(shopName, 256, 66);
+  ctx.fillText(shopName, 256, categoryBadge ? 74 : 66);
 
   return finalizeTexture(canvas, maxAnisotropy);
 }
@@ -791,24 +868,132 @@ export function createWallPosterTexture(
   text: string,
   bgHex: string,
   fgHex: string,
-  maxAnisotropy: number
+  maxAnisotropy: number,
+  sub?: string,
+  badge?: string
 ): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
+  canvas.height = 192;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = bgHex;
+  ctx.fillRect(0, 0, 256, 192);
+  ctx.strokeStyle = fgHex;
+  ctx.lineWidth = 7;
+  ctx.strokeRect(7, 7, 242, 178);
+
+  if (badge) {
+    ctx.fillStyle = fgHex;
+    ctx.fillRect(16, 16, 74, 28);
+    ctx.fillStyle = bgHex;
+    ctx.font = `800 18px ${FONT_STACK}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(badge, 53, 31);
+  }
+
+  ctx.fillStyle = fgHex;
+  ctx.font = `800 28px ${FONT_STACK}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, sub ? 88 : 96);
+
+  if (sub) {
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `700 15px ${FONT_STACK}`;
+    ctx.fillText(sub, 128, 136);
+  }
+
+  return finalizeTexture(canvas, maxAnisotropy);
+}
+
+export function createHangingBannerTexture(
+  title: string,
+  subtitle: string,
+  bgHex: string,
+  fgHex: string,
+  maxAnisotropy: number
+): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
   canvas.height = 160;
   const ctx = canvas.getContext('2d')!;
 
   ctx.fillStyle = bgHex;
-  ctx.fillRect(0, 0, 256, 160);
+  ctx.fillRect(0, 0, 512, 160);
   ctx.strokeStyle = fgHex;
-  ctx.lineWidth = 6;
-  ctx.strokeRect(6, 6, 244, 148);
+  ctx.lineWidth = 8;
+  ctx.strokeRect(8, 8, 496, 144);
+
+  // Decorative corner accents
+  ctx.fillStyle = fgHex;
+  ctx.fillRect(16, 16, 14, 14);
+  ctx.fillRect(482, 16, 14, 14);
+  ctx.fillRect(16, 130, 14, 14);
+  ctx.fillRect(482, 130, 14, 14);
 
   ctx.fillStyle = fgHex;
-  ctx.font = `700 24px ${FONT_STACK}`;
+  ctx.font = `800 38px ${FONT_STACK}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, 128, 82);
+  ctx.fillText(title, 256, 62);
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `700 21px ${FONT_STACK}`;
+  ctx.fillText(subtitle, 256, 114);
+
+  return finalizeTexture(canvas, maxAnisotropy);
+}
+
+export function createTinRoofTexture(
+  baseHex: string,
+  maxAnisotropy: number
+): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+  const rng = makeRng(8813);
+
+  ctx.fillStyle = baseHex;
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Corrugated tin ribs
+  for (let x = 0; x < 256; x += 14) {
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
+    ctx.fillRect(x, 0, 5, 256);
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.fillRect(x + 7, 0, 5, 256);
+  }
+  // Rust streaks
+  for (let i = 0; i < 24; i++) {
+    ctx.fillStyle = 'rgba(124, 45, 18, 0.35)';
+    ctx.fillRect(rng() * 240, rng() * 220, 10 + rng() * 22, 18 + rng() * 44);
+  }
+  return finalizeTexture(canvas, maxAnisotropy, 1, 1, true);
+}
+
+export function createFootbridgeSignTexture(
+  text: string,
+  maxAnisotropy: number
+): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 768;
+  canvas.height = 140;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#065f46';
+  ctx.fillRect(0, 0, 768, 140);
+  ctx.strokeStyle = '#facc15';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(8, 8, 752, 124);
+
+  ctx.fillStyle = '#fef08a';
+  ctx.font = `800 44px ${FONT_STACK}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 384, 72);
 
   return finalizeTexture(canvas, maxAnisotropy);
 }
