@@ -41,20 +41,10 @@ export function MobileControls({
   const bombReady = soundBombCooldown <= 0;
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-10 z-20 flex items-end justify-between px-3 sm:px-5">
-      {/* Left Cluster: Look Back, Horn, Sound-Bomb, Left/Right Circles */}
-      <div className="pointer-events-auto flex flex-col items-start gap-2">
-        <button
-          type="button"
-          aria-label="পেছনে তাকান"
-          {...bindHold('lookBack')}
-          className="comic-btn -rotate-2 flex h-12 w-16 touch-none flex-col items-center justify-center rounded-2xl bg-sky-400 text-[11px] font-black text-stone-950"
-        >
-          <Eye className="h-4 w-4 stroke-[2.6]" />
-          <span>পেছনে</span>
-        </button>
-
-        <div className="flex items-center gap-2">
+    <div className="pointer-events-none fixed inset-x-0 bottom-8 z-20 flex items-end justify-between px-2.5 sm:px-4">
+      {/* Left Bottom Corner: Small Horn + Sound Bomb (+ Look Back) directly above 62px Steering Arrows */}
+      <div className="pointer-events-auto flex flex-col items-start gap-1.5">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
             aria-label="হর্ন"
@@ -62,9 +52,9 @@ export function MobileControls({
               e.preventDefault();
               onHorn();
             }}
-            className="comic-btn rotate-2 flex h-12 w-16 touch-none flex-col items-center justify-center rounded-2xl bg-yellow-300 text-[11px] font-black text-stone-950"
+            className="comic-btn-sm rotate-1 flex h-10 touch-none items-center gap-1 rounded-xl bg-yellow-300 px-2.5 text-[10px] font-black text-stone-950 opacity-75 active:opacity-100 whitespace-nowrap"
           >
-            <Volume2 className="h-4 w-4 stroke-[2.6]" />
+            <Volume2 className="h-3.5 w-3.5 stroke-[2.6]" />
             <span>হর্ন</span>
           </button>
 
@@ -75,53 +65,63 @@ export function MobileControls({
               e.preventDefault();
               onSoundBomb();
             }}
-            className={`comic-btn -rotate-1 flex h-12 w-18 touch-none flex-col items-center justify-center rounded-2xl text-[11px] font-black ${
+            className={`comic-btn-sm -rotate-1 flex h-10 touch-none items-center gap-1 rounded-xl px-2.5 text-[10px] font-black opacity-75 active:opacity-100 whitespace-nowrap ${
               bombReady ? 'bg-pink-500 text-white' : 'bg-stone-300 text-stone-700'
             }`}
           >
-            <Bomb className="h-4 w-4 stroke-[2.6]" />
+            <Bomb className="h-3.5 w-3.5 stroke-[2.6]" />
             <span>{bombReady ? 'শব্দবোমা' : `${toBn(soundBombCooldown)}সে`}</span>
+          </button>
+
+          <button
+            type="button"
+            aria-label="পেছনে তাকান"
+            {...bindHold('lookBack')}
+            className="comic-btn-sm flex h-10 w-10 touch-none items-center justify-center rounded-xl bg-sky-400 text-stone-950 opacity-75 active:opacity-100"
+            title="পেছনে তাকান"
+          >
+            <Eye className="h-4 w-4 stroke-[2.6]" />
           </button>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             aria-label="বামে"
             {...bindHold('left')}
-            className="comic-btn -rotate-2 flex h-16 w-16 touch-none items-center justify-center rounded-full bg-emerald-400 text-stone-950"
+            className="comic-btn -rotate-2 flex h-[62px] w-[62px] touch-none items-center justify-center rounded-full bg-emerald-400 text-stone-950 opacity-75 active:opacity-100"
           >
-            <ArrowLeft className="h-8 w-8 stroke-[3]" />
+            <ArrowLeft className="h-7 w-7 stroke-[3]" />
           </button>
           <button
             type="button"
             aria-label="ডানে"
             {...bindHold('right')}
-            className="comic-btn rotate-2 flex h-16 w-16 touch-none items-center justify-center rounded-full bg-emerald-400 text-stone-950"
+            className="comic-btn rotate-2 flex h-[62px] w-[62px] touch-none items-center justify-center rounded-full bg-emerald-400 text-stone-950 opacity-75 active:opacity-100"
           >
-            <ArrowRight className="h-8 w-8 stroke-[3]" />
+            <ArrowRight className="h-7 w-7 stroke-[3]" />
           </button>
         </div>
       </div>
 
-      {/* Right Cluster: Brake, Drive, Boost */}
-      <div className="pointer-events-auto flex items-end gap-2.5">
+      {/* Right Bottom Corner: 60-66px Brake, Go, Boost at 75% opacity */}
+      <div className="pointer-events-auto flex items-end gap-2">
         <button
           type="button"
           aria-label="ব্রেক"
           {...bindHold('down')}
-          className="comic-btn rotate-2 flex h-18 w-16 touch-none flex-col items-center justify-center gap-0.5 rounded-2xl bg-red-500 text-xs font-black text-white"
+          className="comic-btn rotate-1 flex h-[60px] w-[60px] touch-none flex-col items-center justify-center gap-0.5 rounded-2xl bg-red-500 text-[11px] font-black text-white opacity-75 active:opacity-100"
         >
-          <ArrowDown className="h-6 w-6 stroke-[3]" />
+          <ArrowDown className="h-5 w-5 stroke-[3]" />
           <span>ব্রেক</span>
         </button>
 
-        <div className="flex flex-col items-center gap-2">
+        <div className="flex flex-col items-center gap-1.5">
           <button
             type="button"
             aria-label="চালান"
             {...bindHold('up')}
-            className="comic-btn -rotate-2 flex h-16 w-16 touch-none flex-col items-center justify-center rounded-full bg-lime-400 text-xs font-black text-stone-950"
+            className="comic-btn -rotate-2 flex h-[62px] w-[62px] touch-none flex-col items-center justify-center rounded-full bg-lime-400 text-[11px] font-black text-stone-950 opacity-75 active:opacity-100"
           >
             <ArrowUp className="h-5 w-5 stroke-[3]" />
             <span>চালান</span>
@@ -131,9 +131,9 @@ export function MobileControls({
             type="button"
             aria-label="টান"
             {...bindHold('boost')}
-            className="comic-btn rotate-1 flex h-24 w-20 touch-none flex-col items-center justify-center gap-1 rounded-2xl bg-gradient-to-b from-yellow-300 via-amber-400 to-orange-500 text-sm font-black text-stone-950"
+            className="comic-btn rotate-1 flex h-[66px] w-[62px] touch-none flex-col items-center justify-center gap-0.5 rounded-2xl bg-gradient-to-b from-yellow-300 via-amber-400 to-orange-500 text-xs font-black text-stone-950 opacity-75 active:opacity-100"
           >
-            <Zap className="h-6 w-6 fill-white text-stone-950 stroke-[2.5]" />
+            <Zap className="h-5 w-5 fill-white text-stone-950 stroke-[2.5]" />
             <span>টান</span>
           </button>
         </div>

@@ -5,6 +5,8 @@ import {
   ChevronDown,
   ChevronUp,
   ClipboardList,
+  Eye,
+  EyeOff,
   Flame,
   Gamepad2,
   Gift,
@@ -48,12 +50,14 @@ interface StartModalProps {
   musicEnabled: boolean;
   radioEnabled: boolean;
   showTouchControls: boolean;
+  cleanMode: boolean;
   onSelectArea: (idx: number) => void;
   onToggleCamera: () => void;
   onToggleMute: () => void;
   onToggleMusic: () => void;
   onToggleRadio: () => void;
   onToggleTouch: () => void;
+  onToggleCleanMode: () => void;
   onClaimStreak: () => void;
   onStart: () => void;
   onOpenGarage: () => void;
@@ -74,12 +78,14 @@ export function StartModal({
   musicEnabled,
   radioEnabled,
   showTouchControls,
+  cleanMode,
   onSelectArea,
   onToggleCamera,
   onToggleMute,
   onToggleMusic,
   onToggleRadio,
   onToggleTouch,
+  onToggleCleanMode,
   onClaimStreak,
   onStart,
   onOpenGarage,
@@ -171,6 +177,22 @@ export function StartModal({
                 <span className="hidden sm:inline">
                   {cameraMode === 'driver' ? 'ড্রাইভার' : 'বাইরের ভিউ'}
                 </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onToggleCleanMode}
+                title={cleanMode ? 'ক্লিন মোড বন্ধ করুন' : 'ক্লিন মোড চালু করুন'}
+                className={`comic-btn-sm flex h-10 items-center gap-1 rounded-xl px-2.5 text-xs font-black text-stone-950 whitespace-nowrap ${
+                  cleanMode ? 'bg-cyan-400 rotate-1' : 'bg-stone-200'
+                }`}
+              >
+                {cleanMode ? (
+                  <EyeOff className="h-4 w-4 stroke-[2.5]" />
+                ) : (
+                  <Eye className="h-4 w-4 stroke-[2.5]" />
+                )}
+                <span>ক্লিন মোড</span>
               </button>
             </div>
 

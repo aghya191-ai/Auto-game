@@ -183,10 +183,13 @@ export interface InputState {
   lookBack?: boolean;
 }
 
+export type ToastPriority = 'gameover' | 'crash' | 'gas' | 'area' | 'level' | 'radio';
+
 export interface GameEventToast {
   id: number;
   text: string;
   tone: 'info' | 'warning' | 'danger' | 'success' | 'pink';
+  priority?: ToastPriority;
 }
 
 export type RadioClipKind = 'সংবাদ' | 'ট্রাফিক' | 'গতি';

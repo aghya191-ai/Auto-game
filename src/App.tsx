@@ -17,6 +17,7 @@ import type {
   PlayerSaveData,
   RadioBroadcastClip,
   RadioClipKind,
+  ToastPriority,
 } from './types/game';
 import {
   claimDailyStreakBonus,
@@ -92,7 +93,8 @@ export default function App() {
     tagline: string;
     loopCount: number;
   } | null>(null);
-  const [toasts, setToasts] = useState<GameEventToast[]>([]);
+  const [activeToast, setActiveToast] = useState<GameEventToast | null>(null);
+  const [cleanMode, setCleanMode] = useState(false);
   const [floatingPopups, setFloatingPopups] = useState<FloatingMoneyPopup[]>([]);
   const [comboCount, setComboCount] = useState(0);
   const [comboBurstKey, setComboBurstKey] = useState(0);
@@ -105,6 +107,10 @@ export default function App() {
   const shakeResetTimerRef = useRef<number>(0);
   const flashResetTimerRef = useRef<number>(0);
   const comboTimerRef = useRef<number>(0);
+  const toastHideTimerRef = useRef<number>(0);
+  const toastQueueRef = useRef<GameEventToast[]>([]);
+  const activeToastRef = useRef<GameEventToast | null>(null);
+  const areaBannerActiveRef = useRef<boolean>(false);
   const toastIdRef = useRef(1);
   const popupIdRef = useRef(1);
   const radioIdRef = useRef(1);
@@ -122,8 +128,8 @@ export default function App() {
 
   const pushFloatingPopup = useCallback((text: string, tone: 'gain' | 'damage') => {
     const id = popupIdRef.current++;
-    const offsetX = ((id % 5) - 2) * 26;
-    setFloatingPopups((prev) => [...prev.slice(-4), { id, text, tone, offsetX }]);
+    const offsetX = ((id % 5) - 2) * 20;
+    setFloatingPopups((prev) => [...prev.slice(-3), { id, text, tone, offsetX }]);
     window.setTimeout(() => {
       setFloatingPopups((prev) => prev.filter((p) => p.id !== id));
     }, 1350);
@@ -152,13 +158,109 @@ export default function App() {
     flashResetTimerRef.current = window.setTimeout(() => setCrashFlashActive(false), 260);
   }, []);
 
-  const pushToast = useCallback((toast: Omit<GameEventToast, 'id'>) => {
-    const id = toastIdRef.current++;
-    setToasts((prev) => [...prev.slice(-2), { ...toast, id }]);
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 2600);
+  const getToastPriorityWeight = (toast: Omit<GameEventToast, 'id'>): number => {
+    const weights: Record<ToastPriority, number> = {
+      gameover: 6,
+      crash: 5,
+      gas: 4,
+      area: 3,
+      level: 2,
+      radio: 1,
+    };
+    if (toast.priority) return weights[toast.priority];
+    const t = toast.text;
+    if (
+      toast.tone === 'danger' ||
+      t.includes('ধাক্কা') ||
+      t.includes('লাল বাতি') ||
+      t.includes('ডিভাইডার') ||
+      t.includes('ক্ষুব্ধ') ||
+      t.includes('জ্যাম') ||
+      t.includes('শব্দবোমা') ||
+      t.includes('কম্বো')
+    ) {
+      return weights.crash;
+    }
+    if (
+      t.includes('গ্যাস') ||
+      t.includes('হলুদ জোন') ||
+      t.includes('গোলাপি জোন') ||
+      t.includes('যাত্রী') ||
+      t.includes('সবুজ বাতি')
+    ) {
+      return weights.gas;
+    }
+    if (t.includes('এলাকা')) return weights.area;
+    if (t.includes('লেভেল') || t.includes('পদোন্নতি') || t.includes('মিশন') || t.includes('স্ট্রিক')) {
+      return weights.level;
+    }
+    if (t.includes('রেডিও') || t.includes('এফএম') || t.includes('ভিউ')) {
+      return weights.radio;
+    }
+    return weights.gas;
+  };
+
+  const enqueueBoundedToast = useCallback((item: GameEventToast) => {
+    const queue = [...toastQueueRef.current, item];
+    if (queue.length > 3) {
+      let dropIdx = 0;
+      let lowestWeight = getToastPriorityWeight(queue[0]);
+      for (let i = 1; i < queue.length; i++) {
+        const w = getToastPriorityWeight(queue[i]);
+        if (w < lowestWeight || (w === lowestWeight && queue[i].id < queue[dropIdx].id)) {
+          lowestWeight = w;
+          dropIdx = i;
+        }
+      }
+      queue.splice(dropIdx, 1);
+    }
+    queue.sort((a, b) => {
+      const diff = getToastPriorityWeight(b) - getToastPriorityWeight(a);
+      return diff !== 0 ? diff : a.id - b.id;
+    });
+    toastQueueRef.current = queue;
   }, []);
+
+  const showToastNow = useCallback((nextToast: GameEventToast) => {
+    clearTimeout(toastHideTimerRef.current);
+    activeToastRef.current = nextToast;
+    setActiveToast(nextToast);
+    toastHideTimerRef.current = window.setTimeout(() => {
+      activeToastRef.current = null;
+      setActiveToast(null);
+      if (!areaBannerActiveRef.current && toastQueueRef.current.length > 0) {
+        const upcoming = toastQueueRef.current.shift()!;
+        showToastNow(upcoming);
+      }
+    }, 1500);
+  }, []);
+
+  const pushToast = useCallback(
+    (toast: Omit<GameEventToast, 'id'>) => {
+      const nextToast: GameEventToast = { ...toast, id: toastIdRef.current++ };
+      const nextWeight = getToastPriorityWeight(nextToast);
+
+      if (areaBannerActiveRef.current && nextWeight < 5) {
+        enqueueBoundedToast(nextToast);
+        return;
+      }
+
+      const current = activeToastRef.current;
+      if (!current) {
+        showToastNow(nextToast);
+        return;
+      }
+
+      if (nextWeight > getToastPriorityWeight(current)) {
+        enqueueBoundedToast(current);
+        showToastNow(nextToast);
+        return;
+      }
+
+      enqueueBoundedToast(nextToast);
+    },
+    [enqueueBoundedToast, showToastNow]
+  );
 
   const triggerRadioBroadcast = useCallback(
     (preferKind?: RadioClipKind, force = false) => {
@@ -249,16 +351,29 @@ export default function App() {
           setHud(snapshot);
         },
         onAreaEnter: (name, tagline, loopCount) => {
+          areaBannerActiveRef.current = true;
           setAreaBanner({ name, tagline, loopCount });
           clearTimeout(areaBannerTimerRef.current);
           areaBannerTimerRef.current = window.setTimeout(() => {
+            areaBannerActiveRef.current = false;
             setAreaBanner(null);
-          }, 3000);
+            if (!activeToastRef.current && toastQueueRef.current.length > 0) {
+              const next = toastQueueRef.current.shift()!;
+              showToastNow(next);
+            }
+          }, 2000);
         },
         onToast: (t) => pushToast(t),
         onCrashJuice: () => triggerCrashJuice(),
         onMissionProgress: handleMissionProgress,
         onGameOver: (summary) => {
+          clearTimeout(toastHideTimerRef.current);
+          clearTimeout(areaBannerTimerRef.current);
+          areaBannerActiveRef.current = false;
+          toastQueueRef.current = [];
+          activeToastRef.current = null;
+          setActiveToast(null);
+          setAreaBanner(null);
           setGameOverSummary(summary);
           setPhase('gameover');
           setSave((prev) => {
@@ -285,10 +400,11 @@ export default function App() {
       clearTimeout(shakeResetTimerRef.current);
       clearTimeout(flashResetTimerRef.current);
       clearTimeout(comboTimerRef.current);
+      clearTimeout(toastHideTimerRef.current);
       engine.dispose();
       engineRef.current = null;
     };
-  }, [bumpCombo, handleMissionProgress, pushFloatingPopup, pushToast, triggerCrashJuice]);
+  }, [bumpCombo, handleMissionProgress, pushFloatingPopup, pushToast, showToastNow, triggerCrashJuice]);
 
   const handleToggleCamera = useCallback(() => {
     if (!engineRef.current) return;
@@ -298,6 +414,7 @@ export default function App() {
       pushToast({
         text: next === 'driver' ? 'ড্রাইভার ভিউ চালু 🛺' : 'বাইরের ভিউ চালু 🎥',
         tone: 'info',
+        priority: 'radio',
       });
     }
   }, [phase, pushToast]);
@@ -314,6 +431,7 @@ export default function App() {
         pushToast({
           text: next ? 'চাঁটগাঁ এফএম ৯৯.৮ চালু 📻' : 'এফএম রেডিও বন্ধ',
           tone: 'info',
+          priority: 'radio',
         });
       }
       return next;
@@ -443,6 +561,13 @@ export default function App() {
   const handleStartGame = () => {
     setGameOverSummary(null);
     setShowMissions(false);
+    clearTimeout(toastHideTimerRef.current);
+    clearTimeout(areaBannerTimerRef.current);
+    areaBannerActiveRef.current = false;
+    toastQueueRef.current = [];
+    activeToastRef.current = null;
+    setActiveToast(null);
+    setAreaBanner(null);
     prevTakaRef.current = 0;
     prevDamageRef.current = 0;
     setFloatingPopups([]);
@@ -548,7 +673,7 @@ export default function App() {
         missions: nextMissions,
       };
       savePlayerData(next);
-      pushToast({ text: `মিশন পুরস্কার +৳${toBn(gained)} পকেটে!`, tone: 'success' });
+      pushToast({ text: `মিশন পুরস্কার +৳${toBn(gained)} পকেটে!`, tone: 'success', priority: 'level' });
       return next;
     });
   };
@@ -560,6 +685,7 @@ export default function App() {
       pushToast({
         text: `দিন ${toBn(result.updated.loginStreak)} স্ট্রিক বোনাস +৳${toBn(result.reward)} পকেটে!`,
         tone: 'success',
+        priority: 'level',
       });
       return result.updated;
     });
@@ -591,6 +717,7 @@ export default function App() {
         pushToast({
           text: `পদোন্নতি! নতুন ড্রাইভার লেভেল ${toBn(lvl)}: ${driverProgression.current.title} 🏆`,
           tone: 'success',
+          priority: 'level',
         });
       }
     }
@@ -648,8 +775,9 @@ export default function App() {
           comboCount={comboCount}
           comboBurstKey={comboBurstKey}
           showTouchControls={showTouchControls}
+          cleanMode={cleanMode}
           areaBanner={areaBanner}
-          toasts={toasts}
+          activeToast={activeToast}
           onToggleMute={handleToggleMute}
           onToggleMusic={handleToggleMusic}
           onToggleRadio={handleToggleRadio}
@@ -658,6 +786,7 @@ export default function App() {
           onToggleWeather={() => engineRef.current?.toggleWeather()}
           onTogglePause={handleTogglePause}
           onToggleTouch={() => setShowTouchControls((v) => !v)}
+          onToggleCleanMode={() => setCleanMode((v) => !v)}
           onOpenMissions={() => {
             if (phase === 'playing') {
               engineRef.current?.setPhase('paused');
@@ -670,7 +799,11 @@ export default function App() {
 
       {/* Driver View Instrument Dashboard */}
       {(phase === 'playing' || phase === 'paused') && hud.cameraMode === 'driver' && (
-        <CockpitDashboard hud={hud} showTouchControls={showTouchControls} />
+        <CockpitDashboard
+          hud={hud}
+          showTouchControls={showTouchControls}
+          cleanMode={cleanMode}
+        />
       )}
 
       {/* Mobile Touch Controls */}
@@ -700,27 +833,27 @@ export default function App() {
             musicEnabled={musicEnabled}
             radioEnabled={radioEnabled}
             showTouchControls={showTouchControls}
+            cleanMode={cleanMode}
             onSelectArea={handleSelectStartArea}
             onToggleCamera={handleToggleCamera}
             onToggleMute={handleToggleMute}
             onToggleMusic={handleToggleMusic}
             onToggleRadio={handleToggleRadio}
             onToggleTouch={() => setShowTouchControls((v) => !v)}
+            onToggleCleanMode={() => setCleanMode((v) => !v)}
             onClaimStreak={handleClaimDailyStreak}
             onStart={handleStartGame}
             onOpenGarage={() => handleOpenGarage('menu')}
             onOpenMissions={() => setShowMissions(true)}
           />
-          {toasts.length > 0 && (
-            <div className="pointer-events-none fixed left-1/2 top-20 z-30 flex w-[90vw] max-w-sm -translate-x-1/2 flex-col items-center gap-1.5">
-              {toasts.map((toast) => (
-                <div
-                  key={toast.id}
-                  className="sticker-chip -rotate-1 rounded-xl bg-emerald-500 px-4 py-1.5 text-center text-xs font-black text-stone-950 sm:text-sm"
-                >
-                  {toast.text}
-                </div>
-              ))}
+          {activeToast && (
+            <div className="pointer-events-none fixed left-1/2 top-20 z-30 flex w-[88vw] max-w-sm -translate-x-1/2 justify-center">
+              <div
+                key={activeToast.id}
+                className="animate-toast-pop sticker-chip max-h-[44px] truncate rounded-full bg-emerald-400/90 px-4 py-1 text-center text-xs font-black text-stone-950 sm:text-sm"
+              >
+                {activeToast.text}
+              </div>
             </div>
           )}
         </>
@@ -744,6 +877,15 @@ export default function App() {
                 className="comic-btn -rotate-1 rounded-2xl bg-emerald-400 py-3 text-base font-black text-stone-950 whitespace-nowrap"
               >
                 আবার চালান!
+              </button>
+              <button
+                type="button"
+                onClick={() => setCleanMode((v) => !v)}
+                className={`comic-btn rounded-2xl py-2.5 text-sm font-black text-stone-950 whitespace-nowrap ${
+                  cleanMode ? 'bg-cyan-400' : 'bg-yellow-300'
+                }`}
+              >
+                ক্লিন মোড: {cleanMode ? 'চালু' : 'বন্ধ'}
               </button>
               <button
                 type="button"

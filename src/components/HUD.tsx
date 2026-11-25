@@ -1,11 +1,13 @@
 import {
   AlertTriangle,
-  Award,
   Camera,
   CloudFog,
   CloudRain,
+  Eye,
+  EyeOff,
   Flame,
   Heart,
+  Menu,
   Music,
   Navigation,
   Pause,
@@ -19,8 +21,10 @@ import {
   UserCheck,
   Volume2,
   VolumeX,
+  X,
   Zap,
 } from 'lucide-react';
+import { useState } from 'react';
 import { NEWS_TICKER_LINES } from '../config/chattogramData';
 import type {
   DriverProgression,
@@ -31,7 +35,6 @@ import type {
   RadioBroadcastClip,
 } from '../types/game';
 import { toBn } from '../utils/bengaliDigits';
-import { RickshawBorderStrip } from './StreetArtDecor';
 
 interface HUDProps {
   hud: HudSnapshot;
@@ -46,8 +49,9 @@ interface HUDProps {
   comboCount: number;
   comboBurstKey: number;
   showTouchControls: boolean;
+  cleanMode: boolean;
   areaBanner: { name: string; tagline: string; loopCount: number } | null;
-  toasts: GameEventToast[];
+  activeToast: GameEventToast | null;
   onToggleMute: () => void;
   onToggleMusic: () => void;
   onToggleRadio: () => void;
@@ -56,6 +60,7 @@ interface HUDProps {
   onToggleWeather: () => void;
   onTogglePause: () => void;
   onToggleTouch: () => void;
+  onToggleCleanMode: () => void;
   onOpenMissions: () => void;
 }
 
@@ -72,8 +77,9 @@ export function HUD({
   comboCount,
   comboBurstKey,
   showTouchControls,
+  cleanMode,
   areaBanner,
-  toasts,
+  activeToast,
   onToggleMute,
   onToggleMusic,
   onToggleRadio,
@@ -82,13 +88,19 @@ export function HUD({
   onToggleWeather,
   onTogglePause,
   onToggleTouch,
+  onToggleCleanMode,
   onOpenMissions,
 }: HUDProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
   const isDriverView = hud.cameraMode === 'driver';
   const lowGas = hud.gas < 30;
   const lowHp = hud.hp < 35;
 
   const liveNewsItems = [
+    ...(radioEnabled && activeRadioClip
+      ? [`📻 ${activeRadioClip.station} (${activeRadioClip.kind} · ${activeRadioClip.areaName}): ${activeRadioClip.text}`]
+      : []),
     ...(hud.chasedCount > 0
       ? [`ব্রেকিং: ${hud.areaName} এলাকায় রাস্তায় পথচারী ক্ষুব্ধ — ${toBn(hud.chasedCount)} জন সিএনজির পেছনে দৌড়াচ্ছে`]
       : []),
@@ -104,327 +116,194 @@ export function HUD({
   ];
   const tickerText = liveNewsItems.join('   ◆   ');
 
+  // Single top-center pill priority: urgent activeToast overrides areaBanner; otherwise show areaBanner or activeToast
+  const showToastInsteadOfBanner = Boolean(
+    activeToast && (activeToast.priority === 'gameover' || activeToast.priority === 'crash')
+  );
+  const topPillMode: 'toast' | 'area' | null = showToastInsteadOfBanner
+    ? 'toast'
+    : areaBanner
+    ? 'area'
+    : activeToast
+    ? 'toast'
+    : null;
+
+  const toastToneCls =
+    activeToast?.tone === 'danger'
+      ? 'bg-red-500/85 text-yellow-200'
+      : activeToast?.tone === 'warning'
+      ? 'bg-yellow-300/85 text-stone-950'
+      : activeToast?.tone === 'pink'
+      ? 'bg-pink-400/85 text-stone-950'
+      : activeToast?.tone === 'info'
+      ? 'bg-cyan-300/85 text-stone-950'
+      : 'bg-emerald-400/85 text-stone-950';
+
   return (
-    <div className="pointer-events-none fixed inset-0 z-10 flex flex-col justify-between pb-8">
+    <div className={`pointer-events-none fixed inset-0 z-10 flex flex-col justify-between ${cleanMode ? 'pb-2' : 'pb-7'}`}>
       {/* Top Bar Area */}
-      <div className="flex items-start justify-between gap-2 p-2.5 sm:p-3.5">
-        {/* Top-Left: Stylized Bangladeshi CNG Number Plate, Damage, Vitals, Combo & Chasing Banner */}
-        <div className="flex max-w-[58vw] flex-col items-start gap-1.5 sm:max-w-xs">
-          {/* Bangladeshi Green CNG Registration Number Plate for Money */}
-          <div className="pointer-events-auto relative cng-plate -rotate-[0.8deg] rounded-xl bg-emerald-600 px-2.5 py-1.5 text-white tabular-nums">
-            {/* Plate corner bolts */}
-            <span className="absolute top-1 left-1 h-1.5 w-1.5 rounded-full border border-stone-950 bg-stone-200" />
-            <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full border border-stone-950 bg-stone-200" />
-            <div className="flex items-center gap-2 px-1 text-[10px] font-black text-yellow-200">
-              <span>চট্ট-থ · এক্সপ্রেস</span>
-              {!isDriverView && (
-                <span className="rounded border border-stone-950 bg-yellow-300 px-1.5 py-0.2 text-[9px] text-stone-950">
-                  জাতীয় ক্ষতি
-                </span>
-              )}
-            </div>
-            <div className="mt-0.5 flex items-center gap-2 px-1 text-xs font-black sm:text-sm">
-              <span className="comic-money-stroke text-yellow-300">আজ ৳{toBn(hud.runTaka)}</span>
-              <span className="h-3.5 w-[2px] bg-stone-950/60" />
-              <span className="comic-text-stroke text-white">জমা ৳{toBn(totalTaka + hud.runTaka)}</span>
-            </div>
-          </div>
-
-          {/* Big Stylized 3D Yellow-Gold National Damage Counter */}
-          {!isDriverView && (
-            <div className="damage-text-3d -mt-0.5 text-3xl font-black leading-none tracking-tight text-yellow-300 tabular-nums sm:text-4xl">
-              ৳{toBn(hud.nationalDamage)}
-            </div>
-          )}
-
-          {/* Area + HP + Speed + Wanted Sticker Strip */}
-          <div className="pointer-events-auto sticker-chip rotate-[0.6deg] flex flex-wrap items-center gap-1.5 rounded-xl bg-[#fef6df] px-2.5 py-1 text-[11px] font-black text-stone-950">
-            <span className="text-emerald-800">{hud.areaName}</span>
-            <span className="text-stone-400">·</span>
-            <span className="flex items-center gap-1 tabular-nums">
-              <Heart
-                className={`h-3.5 w-3.5 stroke-[2.6] ${
-                  lowHp ? 'fill-red-500 text-red-700' : 'fill-emerald-500 text-emerald-700'
-                }`}
-              />
-              <span className={lowHp ? 'text-red-700' : 'text-stone-950'}>{toBn(hud.hp)}</span>
+      <div className="flex items-start justify-between gap-2 p-2 sm:p-3">
+        {/* Top-Left HUD */}
+        {cleanMode ? (
+          <div className="pointer-events-auto cng-plate -rotate-[0.6deg] rounded-xl bg-yellow-300 px-3 py-1 text-stone-950 tabular-nums">
+            <span className="text-base font-black sm:text-lg">
+              {toBn(hud.speedKmh)} <span className="text-[11px]">কিমি/ঘ</span>
             </span>
-            {!isDriverView && (
-              <>
-                <span className="text-stone-400">·</span>
-                <span className="text-orange-700 tabular-nums">
-                  {toBn(hud.speedKmh)} কিমি/ঘ
-                </span>
-              </>
-            )}
-            {hud.wanted > 0 && (
-              <>
-                <span className="text-stone-400">·</span>
-                <span className="flex items-center gap-0.5">
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <Star
-                      key={n}
-                      className={`h-3.5 w-3.5 ${
-                        n <= hud.wanted
-                          ? 'fill-pink-500 text-stone-950'
-                          : 'fill-stone-300 text-stone-500'
-                      }`}
-                    />
-                  ))}
-                </span>
-              </>
-            )}
           </div>
+        ) : (
+          <div className="flex max-w-[60vw] flex-col items-start gap-1 sm:max-w-xs">
+            {/* Compact Money & Loss Panel + Combo Badge Beside It */}
+            <div className="flex items-center gap-1.5">
+              <div className="pointer-events-auto relative cng-plate -rotate-[0.6deg] rounded-xl bg-emerald-600 px-2.5 py-1 text-white tabular-nums">
+                <div className="flex items-center gap-1.5 text-[10px] font-black leading-tight sm:text-[11px]">
+                  <span className="comic-money-stroke text-yellow-300">আজ ৳{toBn(hud.runTaka)}</span>
+                  <span className="text-stone-950/70">·</span>
+                  <span className="comic-text-stroke text-white">জমা ৳{toBn(totalTaka + hud.runTaka)}</span>
+                </div>
+                {!isDriverView && (
+                  <div className="mt-0.5 flex items-center gap-1.5 leading-none">
+                    <span className="rounded border border-stone-950 bg-yellow-300 px-1 py-0.2 text-[9px] font-black text-stone-950">
+                      ক্ষতি
+                    </span>
+                    <span className="damage-text-3d text-base font-black text-yellow-300 sm:text-lg">
+                      ৳{toBn(hud.nationalDamage)}
+                    </span>
+                  </div>
+                )}
+              </div>
 
-          {/* Driver Level Sticker Tag */}
-          <div
-            className="pointer-events-auto sticker-chip -rotate-[0.6deg] flex flex-col gap-1 rounded-xl bg-sky-300 px-2.5 py-1 text-stone-950 tabular-nums"
-            title={
-              driverProgression.next
-                ? `পরবর্তী র‍্যাঙ্ক: ${driverProgression.next.title} (আরো ${toBn(driverProgression.pointsToNext)} পয়েন্ট)`
-                : 'সর্বোচ্চ ড্রাইভার র‍্যাঙ্ক অর্জিত!'
-            }
-          >
-            <div className="flex items-center gap-1.5 text-[11px] font-black whitespace-nowrap">
-              <Award className="h-3.5 w-3.5 shrink-0 text-red-700 stroke-[2.5]" />
-              <span>
-                লেভেল {toBn(driverProgression.current.level)} · {driverProgression.current.title}
-              </span>
-              {driverProgression.next && (
-                <span className="text-[10px] font-extrabold text-stone-800">
-                  ({toBn(driverProgression.progressPct)}%)
-                </span>
+              {comboCount >= 2 && (
+                <div
+                  key={comboBurstKey}
+                  className="animate-combo-burst sticker-chip shrink-0 rounded-xl bg-gradient-to-r from-pink-500 to-amber-400 px-2 py-1 text-[11px] font-black text-stone-950 tabular-nums whitespace-nowrap"
+                >
+                  <span className="inline-flex items-center gap-0.5">
+                    <Flame className="h-3.5 w-3.5 fill-yellow-200 text-stone-950" />
+                    <span>×{toBn(comboCount)}</span>
+                  </span>
+                </div>
               )}
             </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full border border-stone-950 bg-white">
-              <div
-                className="h-full bg-orange-500 transition-all duration-300"
-                style={{ width: `${Math.max(6, driverProgression.progressPct)}%` }}
-              />
-            </div>
-          </div>
 
-          {/* Combo Burst Badge */}
-          {comboCount >= 2 && (
-            <div
-              key={comboBurstKey}
-              className="animate-combo-burst sticker-chip rounded-xl bg-gradient-to-r from-pink-500 to-amber-400 px-3 py-1 text-xs font-black text-stone-950 tabular-nums"
-            >
-              <span className="inline-flex items-center gap-1">
-                <Flame className="h-4 w-4 fill-yellow-200 text-stone-950" />
-                <span>কম্বো ×{toBn(comboCount)} · দৌড় চলছে!</span>
-              </span>
-            </div>
-          )}
-
-          {/* Shaking "পাবলিক পিছে!" Banner when Angry Crowd is Chasing */}
-          {hud.chasedCount > 0 && (
-            <div className="animate-crowd-shake sticker-chip rounded-xl bg-red-600 px-3 py-1 text-xs font-black text-yellow-300 sm:text-sm">
-              পাবলিক পিছে! ({toBn(hud.chasedCount)} জন ধাওয়া করছে!)
-            </div>
-          )}
-
-          {/* Wrong-Way Sticker */}
-          {hud.wrongWay && (
-            <div className="sticker-chip rotate-1 rounded-xl bg-cyan-300 px-3 py-1 text-xs font-black text-stone-950">
-              উল্টো পথ · ক্ষতি ×১.৫
-            </div>
-          )}
-
-          {/* Red Blockade / Ahead Hazard Bar */}
-          {hud.aheadHazard && (
-            <div className="sticker-chip -rotate-1 flex items-center overflow-hidden rounded-xl bg-red-600 text-[11px] font-black text-white">
-              <span className="flex items-center gap-1 px-2.5 py-1">
-                <AlertTriangle className="h-3.5 w-3.5 fill-yellow-300 text-stone-950" />
-                {hud.aheadHazard.label}
-              </span>
-              <span className="h-5 w-[2px] bg-stone-950" />
-              <span className="px-2 py-1 text-yellow-200">{hud.aheadHazard.sub}</span>
-              <span className="h-5 w-[2px] bg-stone-950" />
-              <span className="bg-yellow-300 px-2.5 py-1 text-stone-950 tabular-nums">
-                {toBn(hud.aheadHazard.dist)} মি
-              </span>
-            </div>
-          )}
-
-          {/* Traffic Signal Indicator Sticker */}
-          {hud.aheadTrafficLight && (
-            <div
-              className={`sticker-chip flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-[11px] font-black tabular-nums ${
-                hud.aheadTrafficLight.state === 'red'
-                  ? 'bg-red-500 text-white'
-                  : hud.aheadTrafficLight.state === 'yellow'
-                  ? 'bg-yellow-300 text-stone-950'
-                  : 'bg-emerald-400 text-stone-950'
-              }`}
-            >
-              <div className="flex items-center gap-1 rounded-lg border-2 border-stone-950 bg-stone-900 px-1.5 py-1">
-                <span
-                  className={`h-2.5 w-2.5 rounded-full ${
-                    hud.aheadTrafficLight.state === 'red' ? 'bg-red-500' : 'bg-red-950'
+            {/* Single Slim Vitals + Rank Chip */}
+            <div className="pointer-events-auto sticker-chip rotate-[0.4deg] flex flex-wrap items-center gap-1.5 rounded-lg bg-[#fef6df]/95 px-2 py-0.5 text-[10px] font-black text-stone-950">
+              <span className="text-emerald-800">{hud.areaName}</span>
+              <span className="text-stone-400">·</span>
+              <span className="flex items-center gap-0.5 tabular-nums">
+                <Heart
+                  className={`h-3 w-3 stroke-[2.6] ${
+                    lowHp ? 'fill-red-500 text-red-700' : 'fill-emerald-500 text-emerald-700'
                   }`}
                 />
-                <span
-                  className={`h-2.5 w-2.5 rounded-full ${
-                    hud.aheadTrafficLight.state === 'yellow' ? 'bg-amber-400' : 'bg-amber-950'
-                  }`}
-                />
-                <span
-                  className={`h-2.5 w-2.5 rounded-full ${
-                    hud.aheadTrafficLight.state === 'green' ? 'bg-emerald-400' : 'bg-emerald-950'
-                  }`}
-                />
+                <span className={lowHp ? 'text-red-700' : 'text-stone-950'}>{toBn(hud.hp)}</span>
+              </span>
+              {!isDriverView && (
+                <>
+                  <span className="text-stone-400">·</span>
+                  <span className="text-orange-700 tabular-nums">{toBn(hud.speedKmh)} কিমি/ঘ</span>
+                </>
+              )}
+              <span className="text-stone-400">·</span>
+              <span className="text-sky-800 tabular-nums">লে.{toBn(driverProgression.current.level)}</span>
+              {hud.wanted > 0 && (
+                <>
+                  <span className="text-stone-400">·</span>
+                  <span className="flex items-center gap-0.5">
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <Star
+                        key={n}
+                        className={`h-2.5 w-2.5 ${
+                          n <= hud.wanted
+                            ? 'fill-pink-500 text-stone-950'
+                            : 'fill-stone-300 text-stone-500'
+                        }`}
+                      />
+                    ))}
+                  </span>
+                </>
+              )}
+            </div>
+
+            {/* Compact Conditional Alerts (never crowding center 60%) */}
+            {hud.chasedCount > 0 && (
+              <div className="animate-crowd-shake sticker-chip rounded-lg bg-red-600 px-2 py-0.5 text-[10px] font-black text-yellow-300">
+                পাবলিক পিছে! ({toBn(hud.chasedCount)})
               </div>
-              <div className="flex flex-col leading-tight">
+            )}
+
+            {hud.wrongWay && (
+              <div className="sticker-chip rotate-1 rounded-lg bg-cyan-300 px-2 py-0.5 text-[10px] font-black text-stone-950">
+                উল্টো পথ · ×১.৫
+              </div>
+            )}
+
+            {hud.aheadHazard && (
+              <div className="sticker-chip -rotate-1 flex items-center gap-1 rounded-lg bg-red-600 px-2 py-0.5 text-[10px] font-black text-white tabular-nums">
+                <AlertTriangle className="h-3 w-3 shrink-0 fill-yellow-300 text-stone-950" />
+                <span>{hud.aheadHazard.label}</span>
+                <span className="rounded bg-yellow-300 px-1 text-stone-950">{toBn(hud.aheadHazard.dist)} মি</span>
+              </div>
+            )}
+
+            {hud.aheadTrafficLight && (
+              <div
+                className={`sticker-chip flex items-center gap-1.5 rounded-lg px-2 py-0.5 text-[10px] font-black tabular-nums ${
+                  hud.aheadTrafficLight.state === 'red'
+                    ? 'bg-red-500 text-white'
+                    : hud.aheadTrafficLight.state === 'yellow'
+                    ? 'bg-yellow-300 text-stone-950'
+                    : 'bg-emerald-400 text-stone-950'
+                }`}
+              >
+                <span
+                  className={`h-2.5 w-2.5 rounded-full border border-stone-950 ${
+                    hud.aheadTrafficLight.state === 'red'
+                      ? 'bg-red-700'
+                      : hud.aheadTrafficLight.state === 'yellow'
+                      ? 'bg-amber-400'
+                      : 'bg-emerald-500'
+                  }`}
+                />
                 <span>
                   {hud.aheadTrafficLight.state === 'red'
-                    ? 'লাল বাতি — থামুন!'
+                    ? 'লাল বাতি'
                     : hud.aheadTrafficLight.state === 'yellow'
-                    ? 'হলুদ বাতি — সাবধান'
-                    : 'সবুজ বাতি — চলুন'}
+                    ? 'হলুদ বাতি'
+                    : 'সবুজ বাতি'}
                 </span>
-                <span className="text-[10px] opacity-90">
-                  সিগন্যাল {toBn(hud.aheadTrafficLight.dist)} মি · {toBn(hud.aheadTrafficLight.timeLeft)} সে
+                <span>
+                  {toBn(hud.aheadTrafficLight.dist)} মি · {toBn(hud.aheadTrafficLight.timeLeft)} সে
                 </span>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Passenger / Gas Zone Prompt Stickers */}
-          {hud.inGasZone && !isDriverView && (
-            <div className="sticker-chip rounded-xl bg-yellow-300 px-2.5 py-1 text-xs font-black text-stone-950">
-              দাগের ওপর থামেন, গ্যাস ভরছে!
-            </div>
-          )}
-          {hud.passengerActive ? (
-            <div className="sticker-chip flex items-center gap-1 rounded-xl bg-emerald-400 px-2.5 py-1 text-[11px] font-black text-stone-950 tabular-nums">
-              <UserCheck className="h-3.5 w-3.5 shrink-0" />
-              <span>
-                যাত্রী: {toBn(hud.passengerDistLeft)} মি বাকি (৳{toBn(hud.passengerFare)})
-              </span>
-            </div>
-          ) : hud.passengerNearPickup ? (
-            <div className="sticker-chip rounded-xl bg-cyan-300 px-2.5 py-1 text-[11px] font-black text-stone-950">
-              পাশে যাত্রী হাত দেখাচ্ছে — থেমে তুলুন!
-            </div>
-          ) : null}
-        </div>
+            {hud.inGasZone && !isDriverView && (
+              <div className="sticker-chip rounded-lg bg-yellow-300 px-2 py-0.5 text-[10px] font-black text-stone-950">
+                দাগের ওপর থামেন, গ্যাস ভরছে!
+              </div>
+            )}
 
-        {/* Top-Right: Chunky Street-Art Utility Buttons + Gas Plate + Radar */}
-        <div className="flex flex-col items-end gap-1.5">
-          <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-1.5">
-            <button
-              type="button"
-              onClick={onToggleWeather}
-              className={`comic-btn-sm flex h-9 items-center gap-1 rounded-xl px-2.5 text-[11px] font-black text-stone-950 ${
-                hud.weather === 'rainy'
-                  ? 'bg-cyan-300'
-                  : hud.weather === 'foggy'
-                  ? 'bg-stone-200'
-                  : 'bg-yellow-300'
-              }`}
-              title="আবহাওয়া বদলান (T)"
-            >
-              {hud.weather === 'rainy' ? (
-                <CloudRain className="h-3.5 w-3.5 shrink-0 stroke-[2.5]" />
-              ) : hud.weather === 'foggy' ? (
-                <CloudFog className="h-3.5 w-3.5 shrink-0 stroke-[2.5]" />
-              ) : (
-                <Sun className="h-3.5 w-3.5 shrink-0 stroke-[2.5]" />
-              )}
-              <span className="whitespace-nowrap">
-                {hud.weather === 'rainy' ? 'বৃষ্টি' : hud.weather === 'foggy' ? 'কুয়াশা' : 'রোদ'}
-              </span>
-            </button>
+            {hud.passengerActive ? (
+              <div className="sticker-chip flex items-center gap-1 rounded-lg bg-emerald-400 px-2 py-0.5 text-[10px] font-black text-stone-950 tabular-nums">
+                <UserCheck className="h-3 w-3 shrink-0" />
+                <span>
+                  যাত্রী {toBn(hud.passengerDistLeft)} মি (৳{toBn(hud.passengerFare)})
+                </span>
+              </div>
+            ) : hud.passengerNearPickup ? (
+              <div className="sticker-chip rounded-lg bg-cyan-300 px-2 py-0.5 text-[10px] font-black text-stone-950">
+                যাত্রী হাত দেখাচ্ছে — থেমে তুলুন!
+              </div>
+            ) : null}
+          </div>
+        )}
 
-            <button
-              type="button"
-              onClick={onToggleCamera}
-              className={`comic-btn-sm flex h-9 items-center gap-1 rounded-xl px-2.5 text-[11px] font-black text-stone-950 ${
-                isDriverView ? 'bg-pink-400' : 'bg-sky-300'
-              }`}
-              title="ক্যামেরা ভিউ বদলান (C)"
-            >
-              <Camera className="h-3.5 w-3.5 stroke-[2.5]" />
-              <span className="hidden sm:inline whitespace-nowrap">
-                {isDriverView ? 'ড্রাইভার ভিউ' : 'বাইরের ভিউ'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={onOpenMissions}
-              className="comic-btn-sm flex h-9 w-9 items-center justify-center rounded-xl bg-orange-400 text-stone-950"
-              title="দৈনিক ৩টি মিশন"
-            >
-              <Target className="h-4 w-4 stroke-[2.5]" />
-            </button>
-
-            <button
-              type="button"
-              onClick={onToggleTouch}
-              className={`comic-btn-sm flex h-9 w-9 items-center justify-center rounded-xl text-stone-950 ${
-                showTouchControls ? 'bg-lime-400' : 'bg-stone-200'
-              }`}
-              title="টাচ বাটন চালু/বন্ধ"
-            >
-              <Smartphone className="h-4 w-4 stroke-[2.5]" />
-            </button>
-
-            <button
-              type="button"
-              onClick={onToggleMusic}
-              className={`comic-btn-sm flex h-9 w-9 items-center justify-center rounded-xl text-stone-950 ${
-                musicEnabled && !muted ? 'bg-pink-400' : 'bg-stone-200'
-              }`}
-              title="ব্যাকগ্রাউন্ড মিউজিক চালু/বন্ধ"
-            >
-              <Music className="h-4 w-4 stroke-[2.5]" />
-            </button>
-
-            <button
-              type="button"
-              onClick={onToggleRadio}
-              className={`comic-btn-sm flex h-9 w-9 items-center justify-center rounded-xl text-stone-950 ${
-                radioEnabled && !muted ? 'bg-cyan-400' : 'bg-stone-200'
-              }`}
-              title="চাঁটগাঁ এফএম রেডিও চালু/বন্ধ (R)"
-            >
-              <Radio className="h-4 w-4 stroke-[2.5]" />
-            </button>
-
-            <button
-              type="button"
-              onClick={onToggleMute}
-              className={`comic-btn-sm flex h-9 w-9 items-center justify-center rounded-xl ${
-                muted ? 'bg-red-500 text-white' : 'bg-emerald-400 text-stone-950'
-              }`}
-              title={muted ? 'সাউন্ড চালু' : 'সাউন্ড বন্ধ'}
-            >
-              {muted ? (
-                <VolumeX className="h-4 w-4 stroke-[2.5]" />
-              ) : (
-                <Volume2 className="h-4 w-4 stroke-[2.5]" />
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={onTogglePause}
-              className="comic-btn-sm flex h-9 w-9 items-center justify-center rounded-xl bg-[#fef6df] text-stone-950"
-              title={phase === 'paused' ? 'চালু করো' : 'বিরতি'}
-            >
-              {phase === 'paused' ? (
-                <Play className="h-4 w-4 stroke-[2.6]" />
-              ) : (
-                <Pause className="h-4 w-4 stroke-[2.6]" />
-              )}
-            </button>
-
-            {/* Gas / Charge Plate */}
-            {!isDriverView && (
+        {/* Top-Right: Single Round Expandable Menu Button + Compact Gas + Small Minimap */}
+        <div className="relative flex flex-col items-end gap-1.5">
+          <div className="pointer-events-auto flex items-center justify-end gap-1.5">
+            {!cleanMode && !isDriverView && (
               <div
-                className={`cng-plate relative flex h-9 min-w-[92px] items-center justify-center overflow-hidden rounded-xl bg-stone-900 px-3 tabular-nums ${
+                className={`cng-plate relative flex h-8 min-w-[74px] items-center justify-center overflow-hidden rounded-xl bg-stone-900 px-2 tabular-nums ${
                   lowGas ? 'border-red-500' : ''
                 }`}
               >
@@ -434,22 +313,164 @@ export function HUD({
                   }`}
                   style={{ width: `${Math.max(4, hud.gas)}%` }}
                 />
-                <span className="comic-text-stroke relative z-10 flex items-center gap-1 text-sm font-black text-white">
-                  <Zap className="h-3.5 w-3.5 fill-yellow-300 text-stone-950" />
+                <span className="comic-text-stroke relative z-10 flex items-center gap-0.5 text-xs font-black text-white">
+                  <Zap className="h-3 w-3 fill-yellow-300 text-stone-950" />
                   {toBn(Math.round(hud.gas))}%
                 </span>
               </div>
             )}
+
+            {/* ONE Round Menu Button */}
+            <button
+              type="button"
+              onClick={() => setMenuOpen((o) => !o)}
+              aria-label="মেনু"
+              title="মেনু ও সেটিংস"
+              className={`comic-btn-sm flex h-10 w-10 items-center justify-center rounded-full ${
+                menuOpen ? 'bg-orange-400 text-stone-950' : 'bg-[#fef6df] text-stone-950'
+              }`}
+            >
+              {menuOpen ? <X className="h-5 w-5 stroke-[2.8]" /> : <Menu className="h-5 w-5 stroke-[2.8]" />}
+            </button>
           </div>
 
-          {!isDriverView && lowGas && (
-            <div className="sticker-chip -rotate-1 rounded-xl bg-yellow-300 px-3 py-0.5 text-[11px] font-black text-red-700">
-              দাগে থামেন — গ্যাস শেষ!
+          {/* Expandable Compact Menu Popover */}
+          {menuOpen && (
+            <div className="pointer-events-auto sticker-panel absolute top-11 right-0 z-40 grid w-56 grid-cols-2 gap-1.5 rounded-2xl bg-[#fef6df] p-2 text-stone-950">
+              <button
+                type="button"
+                onClick={() => {
+                  onTogglePause();
+                  setMenuOpen(false);
+                }}
+                className="comic-btn-sm flex h-8 items-center justify-center gap-1 rounded-xl bg-amber-300 px-2 text-[11px] font-black whitespace-nowrap"
+              >
+                {phase === 'paused' ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+                <span>{phase === 'paused' ? 'চালু' : 'বিরতি'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onToggleCleanMode();
+                  setMenuOpen(false);
+                }}
+                className={`comic-btn-sm flex h-8 items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-black whitespace-nowrap ${
+                  cleanMode ? 'bg-cyan-400' : 'bg-stone-200'
+                }`}
+              >
+                {cleanMode ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                <span>ক্লিন মোড</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onToggleCamera();
+                  setMenuOpen(false);
+                }}
+                className={`comic-btn-sm flex h-8 items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-black whitespace-nowrap ${
+                  isDriverView ? 'bg-pink-400' : 'bg-sky-300'
+                }`}
+              >
+                <Camera className="h-3.5 w-3.5" />
+                <span>{isDriverView ? 'ড্রাইভার' : 'বাইরের ভিউ'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onToggleWeather}
+                className={`comic-btn-sm flex h-8 items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-black whitespace-nowrap ${
+                  hud.weather === 'rainy'
+                    ? 'bg-cyan-300'
+                    : hud.weather === 'foggy'
+                    ? 'bg-stone-200'
+                    : 'bg-yellow-300'
+                }`}
+              >
+                {hud.weather === 'rainy' ? (
+                  <CloudRain className="h-3.5 w-3.5" />
+                ) : hud.weather === 'foggy' ? (
+                  <CloudFog className="h-3.5 w-3.5" />
+                ) : (
+                  <Sun className="h-3.5 w-3.5" />
+                )}
+                <span>{hud.weather === 'rainy' ? 'বৃষ্টি' : hud.weather === 'foggy' ? 'কুয়াশা' : 'রোদ'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onToggleMute}
+                className={`comic-btn-sm flex h-8 items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-black whitespace-nowrap ${
+                  muted ? 'bg-red-500 text-white' : 'bg-emerald-400 text-stone-950'
+                }`}
+              >
+                {muted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+                <span>{muted ? 'মিউট' : 'সাউন্ড'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onToggleMusic}
+                className={`comic-btn-sm flex h-8 items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-black whitespace-nowrap ${
+                  musicEnabled && !muted ? 'bg-pink-400' : 'bg-stone-200'
+                }`}
+              >
+                <Music className="h-3.5 w-3.5" />
+                <span>মিউজিক</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onToggleRadio}
+                className={`comic-btn-sm flex h-8 items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-black whitespace-nowrap ${
+                  radioEnabled && !muted ? 'bg-cyan-400' : 'bg-stone-200'
+                }`}
+              >
+                <Radio className="h-3.5 w-3.5" />
+                <span>এফএম রেডিও</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onNextRadioClip();
+                  setMenuOpen(false);
+                }}
+                disabled={!radioEnabled}
+                className="comic-btn-sm flex h-8 items-center justify-center gap-1 rounded-xl bg-orange-400 px-2 text-[11px] font-black whitespace-nowrap disabled:opacity-50"
+              >
+                <SkipForward className="h-3.5 w-3.5" />
+                <span>পরের খবর</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onToggleTouch}
+                className={`comic-btn-sm flex h-8 items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-black whitespace-nowrap ${
+                  showTouchControls ? 'bg-lime-400' : 'bg-stone-200'
+                }`}
+              >
+                <Smartphone className="h-3.5 w-3.5" />
+                <span>টাচ বাটন</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onOpenMissions();
+                }}
+                className="comic-btn-sm flex h-8 items-center justify-center gap-1 rounded-xl bg-orange-300 px-2 text-[11px] font-black whitespace-nowrap"
+              >
+                <Target className="h-3.5 w-3.5" />
+                <span>মিশন</span>
+              </button>
             </div>
           )}
 
-          {/* Circular Minimap Radar with Bold Ink Border */}
-          <div className="relative h-24 w-24 overflow-hidden rounded-full border-[3.5px] border-stone-950 bg-stone-900 shadow-[4px_4px_0_#1c1917] sm:h-28 sm:w-28">
+          {/* Small Circular Minimap Radar */}
+          <div className="relative h-16 w-16 overflow-hidden rounded-full border-[3px] border-stone-950 bg-stone-900 shadow-[3px_3px_0_#1c1917] sm:h-20 sm:w-20">
             <svg viewBox="0 0 100 100" className="h-full w-full">
               <rect x="33" y="0" width="34" height="100" fill="#292524" />
               <line x1="50" y1="0" x2="50" y2="100" stroke="#facc15" strokeWidth="1.8" />
@@ -558,12 +579,12 @@ export function HUD({
             </svg>
           </div>
 
-          {hud.nearestGasDist !== null && (
-            <div className="sticker-chip flex items-center gap-1 rounded-xl bg-yellow-300 px-2.5 py-0.5 text-[11px] font-black text-stone-950 tabular-nums">
+          {!cleanMode && hud.nearestGasDist !== null && (
+            <div className="sticker-chip flex items-center gap-0.5 rounded-lg bg-yellow-300/95 px-2 py-0.5 text-[10px] font-black text-stone-950 tabular-nums">
               <Navigation
-                className={`h-3 w-3 text-red-600 ${hud.nearestGasAhead ? '' : 'rotate-180'}`}
+                className={`h-2.5 w-2.5 text-red-600 ${hud.nearestGasAhead ? '' : 'rotate-180'}`}
               />
-              <Zap className="h-3 w-3 fill-orange-500 text-stone-950" />
+              <Zap className="h-2.5 w-2.5 fill-orange-500 text-stone-950" />
               <span>
                 {toBn(hud.nearestGasDist)} মি {hud.nearestGasAhead ? 'সামনে' : 'পিছনে'}
               </span>
@@ -572,115 +593,77 @@ export function HUD({
         </div>
       </div>
 
-      {/* Floating +৳৫০০ / Damage Wobble Popups */}
-      <div className="pointer-events-none fixed left-1/2 top-44 z-30">
-        {floatingPopups.map((popup) => (
-          <div
-            key={popup.id}
-            className="animate-float-wobble absolute top-0 whitespace-nowrap tabular-nums"
-            style={{ left: `${popup.offsetX}px` }}
-          >
-            <span
-              className={`inline-block rounded-xl border-[2.5px] border-stone-950 px-3 py-1 text-lg font-black shadow-[3px_3px_0_#1c1917] sm:text-xl ${
-                popup.tone === 'gain'
-                  ? 'bg-yellow-300 text-emerald-800'
-                  : 'bg-red-500 text-yellow-200'
-              }`}
-            >
-              {popup.text}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {/* Center Area Entry Street-Art Poster Banner, Event Toasts & Radio On-Air Card */}
-      <div className="pointer-events-none fixed left-1/2 top-24 z-20 flex w-[92vw] max-w-md -translate-x-1/2 flex-col items-center gap-2 sm:top-20">
-        {areaBanner && (
-          <div className="sticker-panel w-full -rotate-[0.6deg] overflow-hidden rounded-2xl bg-[#fef6df] text-center text-stone-950">
-            <RickshawBorderStrip />
-            <div className="px-4 py-2.5">
-              <div className="inline-block rounded-lg border-2 border-stone-950 bg-emerald-400 px-2.5 py-0.5 text-[11px] font-black text-stone-950">
-                এলাকা প্রবেশ · লুপ #{toBn(areaBanner.loopCount)}
-              </div>
-              <div className="comic-text-stroke mt-1 text-3xl font-black text-yellow-300">
-                {areaBanner.name}
-              </div>
-              <div className="text-xs font-extrabold text-stone-800">{areaBanner.tagline}</div>
-            </div>
-          </div>
-        )}
-
-        {toasts.map((toast, idx) => {
-          const colorCls =
-            toast.tone === 'danger'
-              ? 'bg-red-500 text-yellow-200'
-              : toast.tone === 'warning'
-              ? 'bg-yellow-300 text-stone-950'
-              : toast.tone === 'pink'
-              ? 'bg-pink-400 text-stone-950'
-              : 'bg-emerald-400 text-stone-950';
-          return (
+      {/* Floating +৳৫০০ / Damage Wobble Popups positioned near top-left so center road stays clear */}
+      {!cleanMode && (
+        <div className="pointer-events-none fixed left-20 top-20 z-30 sm:left-28 sm:top-20">
+          {floatingPopups.map((popup) => (
             <div
-              key={toast.id}
-              className={`sticker-chip rounded-xl px-3.5 py-1.5 text-center text-xs font-black sm:text-sm ${
-                idx % 2 === 0 ? '-rotate-1' : 'rotate-1'
-              } ${colorCls}`}
+              key={popup.id}
+              className="animate-float-wobble absolute top-0 whitespace-nowrap tabular-nums"
+              style={{ left: `${popup.offsetX}px` }}
             >
-              {toast.text}
-            </div>
-          );
-        })}
-
-        {/* Chattogram FM 99.8 Torn-Paper On-Air Card */}
-        {radioEnabled && activeRadioClip && (
-          <div className="pointer-events-auto sticker-panel paper-torn w-full rotate-[0.5deg] overflow-hidden rounded-2xl text-left text-stone-950">
-            <div className="flex items-center justify-between gap-2 bg-cyan-400 px-3 py-1 border-b-2 border-stone-950">
-              <div className="flex items-center gap-1.5 text-[11px] font-black text-stone-950 whitespace-nowrap">
-                <Radio className="h-3.5 w-3.5 shrink-0 stroke-[2.6]" />
-                <span>{activeRadioClip.station}</span>
-                <span className="rounded-md border-2 border-stone-950 bg-yellow-300 px-1.5 py-0.2 text-[10px] font-black">
-                  {activeRadioClip.kind}
-                </span>
-                <span className="text-[10px] font-extrabold text-stone-900">
-                  · {activeRadioClip.areaName}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={onNextRadioClip}
-                title="পরবর্তী রেডিও সংবাদ/মন্তব্য"
-                className="comic-btn-sm flex h-6 items-center gap-1 rounded-lg bg-orange-400 px-2 text-[10px] font-black text-stone-950 whitespace-nowrap"
+              <span
+                className={`inline-block rounded-lg border-2 border-stone-950 px-2.5 py-0.5 text-sm font-black shadow-[2px_2px_0_#1c1917] sm:text-base ${
+                  popup.tone === 'gain'
+                    ? 'bg-yellow-300 text-emerald-800'
+                    : 'bg-red-500 text-yellow-200'
+                }`}
               >
-                <SkipForward className="h-3 w-3" />
-                <span>পরেরটি</span>
-              </button>
+                {popup.text}
+              </span>
             </div>
-            <p className="px-3 py-2 text-xs font-extrabold leading-snug text-stone-950">
-              {activeRadioClip.text}
-            </p>
-          </div>
-        )}
-      </div>
+          ))}
+        </div>
+      )}
 
-      {/* Desktop Keyboard Hint above Ticker (External View) */}
-      {!showTouchControls && phase === 'playing' && !isDriverView && (
-        <div className="sticker-chip mx-auto mb-1.5 hidden rounded-xl bg-[#fef6df] px-3 py-1 text-xs font-black text-stone-950 md:block">
+      {/* TOP-CENTER Single Small Pill Slot (max ~44px tall, semi-transparent, auto-hides) */}
+      {!cleanMode && topPillMode && (
+        <div className="pointer-events-none fixed left-1/2 top-14 z-20 flex w-[84vw] max-w-sm -translate-x-1/2 justify-center sm:top-3">
+          {topPillMode === 'toast' && activeToast && (
+            <div
+              key={activeToast.id}
+              className={`animate-toast-pop flex max-h-[44px] max-w-full items-center gap-1.5 truncate rounded-full border-2 border-stone-950 px-3.5 py-1 text-center text-xs font-black shadow-[2px_2px_0_#1c1917] ${toastToneCls}`}
+            >
+              <span className="truncate">{activeToast.text}</span>
+            </div>
+          )}
+
+          {topPillMode === 'area' && areaBanner && (
+            <div
+              key={`${areaBanner.name}-${areaBanner.loopCount}`}
+              className="animate-toast-pop flex max-h-[44px] max-w-full items-center gap-1.5 rounded-full border-2 border-stone-950 bg-[#fef6df]/90 px-3.5 py-1 text-xs font-black text-stone-950 shadow-[2px_2px_0_#1c1917] whitespace-nowrap"
+            >
+              <span className="text-emerald-700">এলাকা:</span>
+              <span className="truncate">{areaBanner.name}</span>
+              <span className="rounded-full border border-stone-950 bg-yellow-300 px-1.5 py-0.2 text-[10px] font-black tabular-nums">
+                লুপ #{toBn(areaBanner.loopCount)}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Desktop Keyboard Hint above Ticker */}
+      {!cleanMode && !showTouchControls && phase === 'playing' && !isDriverView && (
+        <div className="sticker-chip mx-auto mb-1 hidden rounded-lg bg-[#fef6df]/90 px-2.5 py-0.5 text-[11px] font-black text-stone-950 md:block">
           W/A/S/D বা তীর: চালানো · Shift: বুস্ট · H: হর্ন · B: শব্দবোমা · C: ক্যামেরা · T: আবহাওয়া · R: রেডিও · V: পেছনে
         </div>
       )}
 
-      {/* Bottom Live Breaking News Street Ticker */}
-      <div className="fixed inset-x-0 bottom-0 z-20 flex h-8 items-center overflow-hidden border-t-[3px] border-stone-950 bg-blue-900">
-        <div className="z-10 flex h-full shrink-0 items-center border-r-[3px] border-stone-950 bg-orange-400 px-3 text-xs font-black text-stone-950">
-          সর্বশেষ
-        </div>
-        <div className="relative flex-1 overflow-hidden">
-          <div className="animate-ticker whitespace-nowrap text-xs font-black text-yellow-200">
-            <span className="pr-12">{tickerText}</span>
-            <span className="pr-12">{tickerText}</span>
+      {/* Bottom Live Breaking News Street Ticker (with single-line FM Radio feed) */}
+      {!cleanMode && (
+        <div className="fixed inset-x-0 bottom-0 z-20 flex h-7 items-center overflow-hidden border-t-[2.5px] border-stone-950 bg-blue-900">
+          <div className="z-10 flex h-full shrink-0 items-center border-r-[2.5px] border-stone-950 bg-orange-400 px-2.5 text-[11px] font-black text-stone-950">
+            {radioEnabled && activeRadioClip ? 'চাঁটগাঁ এফএম' : 'সর্বশেষ'}
+          </div>
+          <div className="relative flex-1 overflow-hidden">
+            <div className="animate-ticker whitespace-nowrap text-[11px] font-black text-yellow-200">
+              <span className="pr-12">{tickerText}</span>
+              <span className="pr-12">{tickerText}</span>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

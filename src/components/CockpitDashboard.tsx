@@ -7,6 +7,7 @@ import { RickshawBorderStrip } from './StreetArtDecor';
 interface CockpitDashboardProps {
   hud: HudSnapshot;
   showTouchControls: boolean;
+  cleanMode?: boolean;
 }
 
 const SPEED_TICKS = [
@@ -19,7 +20,7 @@ const SPEED_TICKS = [
   { val: 120, label: '১২০' },
 ];
 
-export function CockpitDashboard({ hud, showTouchControls }: CockpitDashboardProps) {
+export function CockpitDashboard({ hud, showTouchControls, cleanMode = false }: CockpitDashboardProps) {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -258,9 +259,11 @@ export function CockpitDashboard({ hud, showTouchControls }: CockpitDashboardPro
           </div>
         </div>
 
-        <div className="sticker-chip hidden rounded-lg bg-[#fef6df] px-2.5 py-0.5 text-[11px] font-black text-stone-950 sm:block">
-          C: ভিউ বদল · V (ধরে রাখুন): পেছনে তাকান · মাউস/টাচ ড্র্যাগ: আশেপাশে দেখুন
-        </div>
+        {!cleanMode && (
+          <div className="sticker-chip hidden rounded-lg bg-[#fef6df] px-2.5 py-0.5 text-[11px] font-black text-stone-950 sm:block">
+            C: ভিউ বদল · V (ধরে রাখুন): পেছনে তাকান · মাউস/টাচ ড্র্যাগ: আশেপাশে দেখুন
+          </div>
+        )}
       </div>
     </div>
   );
