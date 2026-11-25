@@ -1,0 +1,346 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    font-family: 'Baloo Da 2', 'Hind Siliguri', 'Noto Sans Bengali', system-ui, -apple-system, sans-serif;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    touch-action: none;
+    background-color: #0c0a09;
+    color: #f5f5f4;
+    font-weight: 700;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Bold comic outlines & 3D street-art text shadows */
+.damage-text-3d {
+  -webkit-text-stroke: 2px #1c1917;
+  paint-order: stroke fill;
+  text-shadow:
+    3px 3px 0 #991b1b,
+    5px 5px 0 #1c1917,
+    0 6px 12px rgba(0, 0, 0, 0.45);
+}
+
+.title-text-3d {
+  -webkit-text-stroke: 3px #1c1917;
+  paint-order: stroke fill;
+  text-shadow:
+    4px 4px 0 #b91c1c,
+    7px 7px 0 #1c1917,
+    0 10px 18px rgba(0, 0, 0, 0.55);
+}
+
+.comic-text-stroke {
+  -webkit-text-stroke: 1.5px #1c1917;
+  paint-order: stroke fill;
+  text-shadow: 2px 2px 0 #1c1917;
+}
+
+.comic-money-stroke {
+  -webkit-text-stroke: 2px #1c1917;
+  paint-order: stroke fill;
+  text-shadow:
+    2px 2px 0 #064e3b,
+    3.5px 3.5px 0 #1c1917;
+}
+
+/* Chunky 3D sticker button with inner highlight & bouncy press squash */
+.comic-btn {
+  border: 3px solid #1c1917;
+  box-shadow:
+    0 5px 0 #1c1917,
+    inset 0 2.5px 0 rgba(255, 255, 255, 0.45);
+  transition: transform 140ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 140ms ease, filter 120ms ease;
+}
+
+.comic-btn:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.comic-btn:active:not(:disabled) {
+  transform: translateY(4px) scaleX(1.05) scaleY(0.92);
+  box-shadow:
+    0 1px 0 #1c1917,
+    inset 0 2px 0 rgba(255, 255, 255, 0.3);
+}
+
+.comic-btn-sm {
+  border: 2.5px solid #1c1917;
+  box-shadow:
+    0 3.5px 0 #1c1917,
+    inset 0 2px 0 rgba(255, 255, 255, 0.42);
+  transition: transform 130ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 130ms ease, filter 120ms ease;
+}
+
+.comic-btn-sm:active:not(:disabled) {
+  transform: translateY(3px) scaleX(1.06) scaleY(0.9);
+  box-shadow:
+    0 0.5px 0 #1c1917,
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* Sticker / Torn-Paper Cards */
+.sticker-panel {
+  border: 3px solid #1c1917;
+  box-shadow:
+    4px 4px 0 #1c1917,
+    inset 0 2px 0 rgba(255, 255, 255, 0.55);
+}
+
+.sticker-chip {
+  border: 2.5px solid #1c1917;
+  box-shadow:
+    2.5px 2.5px 0 #1c1917,
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.45);
+}
+
+.paper-torn {
+  background-color: #fef6df;
+  background-image: radial-gradient(rgba(120, 53, 15, 0.06) 1px, transparent 0);
+  background-size: 14px 14px;
+  clip-path: polygon(
+    0% 2px, 4% 0%, 9% 3px, 15% 0%, 22% 2.5px, 29% 0%, 36% 3px, 44% 0%, 51% 2px, 59% 0%, 66% 3px, 74% 0%, 82% 2px, 90% 0%, 96% 3px, 100% 1px,
+    99.5% 22%, 100% 48%, 99.4% 74%, 100% 98%,
+    95% 100%, 88% 97.5%, 80% 100%, 72% 98%, 64% 100%, 55% 97.5%, 47% 100%, 39% 98%, 30% 100%, 22% 97.5%, 14% 100%, 6% 98%, 0% 100%,
+    0.5% 75%, 0% 50%, 0.6% 24%
+  );
+}
+
+/* Bangladeshi CNG Number Plate look */
+.cng-plate {
+  border: 3px solid #1c1917;
+  box-shadow:
+    3px 4px 0 #1c1917,
+    inset 0 2px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.3);
+}
+
+/* Keyframes */
+@keyframes tickerScroll {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-ticker {
+  display: flex;
+  width: max-content;
+  animation: tickerScroll 26s linear infinite;
+}
+
+@keyframes sunburstSpin {
+  0% {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+  100% {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+.animate-sunburst {
+  animation: sunburstSpin 38s linear infinite;
+}
+
+@keyframes petalDrift {
+  0% {
+    transform: translate3d(0, -10vh, 0) rotate(0deg);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.92;
+  }
+  85% {
+    opacity: 0.92;
+  }
+  100% {
+    transform: translate3d(38px, 108vh, 0) rotate(320deg);
+    opacity: 0;
+  }
+}
+
+.animate-petal {
+  animation-name: petalDrift;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@keyframes comboBurst {
+  0% {
+    transform: scale(0.4) rotate(-8deg);
+    opacity: 0;
+  }
+  45% {
+    transform: scale(1.22) rotate(3deg);
+    opacity: 1;
+  }
+  72% {
+    transform: scale(0.95) rotate(-2deg);
+  }
+  100% {
+    transform: scale(1) rotate(-1.5deg);
+    opacity: 1;
+  }
+}
+
+.animate-combo-burst {
+  animation: comboBurst 360ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes crowdShake {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) rotate(-1.5deg);
+  }
+  20% {
+    transform: translate3d(-4px, -1px, 0) rotate(-3deg);
+  }
+  40% {
+    transform: translate3d(4px, 1px, 0) rotate(1.5deg);
+  }
+  60% {
+    transform: translate3d(-3px, 1px, 0) rotate(-2.5deg);
+  }
+  80% {
+    transform: translate3d(3px, -1px, 0) rotate(1deg);
+  }
+}
+
+.animate-crowd-shake {
+  animation: crowdShake 320ms ease-in-out infinite;
+}
+
+@keyframes floatWobble {
+  0% {
+    transform: translate3d(-50%, 12px, 0) scale(0.65) rotate(-5deg);
+    opacity: 0;
+  }
+  20% {
+    transform: translate3d(-46%, -8px, 0) scale(1.18) rotate(4deg);
+    opacity: 1;
+  }
+  50% {
+    transform: translate3d(-54%, -34px, 0) scale(1.04) rotate(-4deg);
+    opacity: 1;
+  }
+  80% {
+    transform: translate3d(-48%, -62px, 0) scale(0.98) rotate(3deg);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate3d(-50%, -88px, 0) scale(0.85) rotate(-2deg);
+    opacity: 0;
+  }
+}
+
+.animate-float-wobble {
+  animation: floatWobble 1350ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes screenCrashShake {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  15% {
+    transform: translate3d(-9px, 5px, 0) rotate(-1deg);
+  }
+  30% {
+    transform: translate3d(9px, -6px, 0) rotate(1deg);
+  }
+  45% {
+    transform: translate3d(-7px, -4px, 0) rotate(-0.6deg);
+  }
+  60% {
+    transform: translate3d(6px, 4px, 0) rotate(0.6deg);
+  }
+  75% {
+    transform: translate3d(-4px, 2px, 0) rotate(-0.3deg);
+  }
+}
+
+.animate-screen-shake {
+  animation: screenCrashShake 320ms ease-out;
+}
+
+@keyframes crashFlash {
+  0% {
+    opacity: 0.72;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-crash-flash {
+  animation: crashFlash 260ms ease-out forwards;
+}
+
+@keyframes stampSlam {
+  0% {
+    transform: scale(2.8) rotate(-28deg);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(0.88) rotate(-9deg);
+    opacity: 1;
+  }
+  78% {
+    transform: scale(1.06) rotate(-13deg);
+  }
+  100% {
+    transform: scale(1) rotate(-11deg);
+    opacity: 0.96;
+  }
+}
+
+.animate-stamp-slam {
+  animation: stampSlam 460ms cubic-bezier(0.22, 1, 0.36, 1) 180ms both;
+}
+
+@keyframes speedLineZoom {
+  0% {
+    opacity: 0.35;
+    transform: scale(0.95);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(1.03);
+  }
+  100% {
+    opacity: 0.35;
+    transform: scale(0.95);
+  }
+}
+
+.animate-speed-lines {
+  animation: speedLineZoom 240ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-ticker,
+  .animate-sunburst,
+  .animate-petal,
+  .animate-combo-burst,
+  .animate-crowd-shake,
+  .animate-float-wobble,
+  .animate-screen-shake,
+  .animate-crash-flash,
+  .animate-stamp-slam,
+  .animate-speed-lines {
+    animation: none !important;
+  }
+}
