@@ -5,16 +5,20 @@ import {
   ChevronDown,
   ChevronUp,
   ClipboardList,
+  CloudRain,
   Eye,
   EyeOff,
   Flame,
   Gamepad2,
+  Gauge,
   Gift,
   Lock,
   MapPin,
   Music,
   Paintbrush,
   Radio,
+  Sun,
+  Sunset,
   Volume2,
   VolumeX,
 } from 'lucide-react';
@@ -25,7 +29,13 @@ import {
   DRIVER_RANKS,
   MISSION_RANK_POINTS,
 } from '../config/chattogramData';
-import type { CameraMode, DailyMission, DriverProgression } from '../types/game';
+import type {
+  AtmosphereMode,
+  CameraMode,
+  DailyMission,
+  DriverProgression,
+  GraphicsQuality,
+} from '../types/game';
 import { toBn } from '../utils/bengaliDigits';
 import { getDailyStreakReward } from '../utils/storage';
 import {
@@ -44,6 +54,8 @@ interface StartModalProps {
   streakClaimedToday: boolean;
   startAreaIndex: number;
   cameraMode: CameraMode;
+  atmosphereMode: AtmosphereMode;
+  graphicsQuality: GraphicsQuality;
   missions: DailyMission[];
   unclaimedMissions: number;
   muted: boolean;
@@ -53,6 +65,8 @@ interface StartModalProps {
   cleanMode: boolean;
   onSelectArea: (idx: number) => void;
   onToggleCamera: () => void;
+  onToggleAtmosphere: () => void;
+  onToggleGraphics: () => void;
   onToggleMute: () => void;
   onToggleMusic: () => void;
   onToggleRadio: () => void;
@@ -72,6 +86,8 @@ export function StartModal({
   streakClaimedToday,
   startAreaIndex,
   cameraMode,
+  atmosphereMode,
+  graphicsQuality,
   missions,
   unclaimedMissions,
   muted,
@@ -81,6 +97,8 @@ export function StartModal({
   cleanMode,
   onSelectArea,
   onToggleCamera,
+  onToggleAtmosphere,
+  onToggleGraphics,
   onToggleMute,
   onToggleMusic,
   onToggleRadio,
@@ -109,13 +127,13 @@ export function StartModal({
       <div className="pointer-events-none fixed inset-0 z-20 flex flex-col justify-between px-3 pt-9 pb-3 sm:px-6 sm:pt-11 sm:pb-5">
         {/* Top Bar: Chunky Street-Art Utility Toggles + Streak + Wanted Stamp */}
         <div className="pointer-events-auto flex flex-col items-center gap-1.5">
-          <div className="flex w-full max-w-2xl items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="flex w-full max-w-2xl flex-wrap items-center justify-between gap-1.5 sm:flex-nowrap sm:gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <button
                 type="button"
                 onClick={onToggleMusic}
                 title={musicEnabled ? 'মিউজিক বন্ধ করুন' : 'মিউজিক চালু করুন'}
-                className={`comic-btn-sm flex h-10 w-10 items-center justify-center rounded-xl ${
+                className={`comic-btn-sm flex h-9 w-9 items-center justify-center rounded-xl sm:h-10 sm:w-10 ${
                   musicEnabled && !muted
                     ? 'bg-pink-400 text-stone-950 -rotate-3'
                     : 'bg-stone-200 text-stone-700'
@@ -128,7 +146,7 @@ export function StartModal({
                 type="button"
                 onClick={onToggleRadio}
                 title={radioEnabled ? 'এফএম রেডিও বন্ধ করুন' : 'এফএম রেডিও চালু করুন'}
-                className={`comic-btn-sm flex h-10 w-10 items-center justify-center rounded-xl ${
+                className={`comic-btn-sm flex h-9 w-9 items-center justify-center rounded-xl sm:h-10 sm:w-10 ${
                   radioEnabled && !muted
                     ? 'bg-cyan-400 text-stone-950 rotate-2'
                     : 'bg-stone-200 text-stone-700'
@@ -141,7 +159,7 @@ export function StartModal({
                 type="button"
                 onClick={onToggleMute}
                 title={muted ? 'শব্দ চালু করুন' : 'শব্দ বন্ধ করুন'}
-                className={`comic-btn-sm flex h-10 w-10 items-center justify-center rounded-xl ${
+                className={`comic-btn-sm flex h-9 w-9 items-center justify-center rounded-xl sm:h-10 sm:w-10 ${
                   muted
                     ? 'bg-red-500 text-white -rotate-2'
                     : 'bg-emerald-400 text-stone-950'
@@ -158,7 +176,7 @@ export function StartModal({
                 type="button"
                 onClick={onToggleTouch}
                 title={showTouchControls ? 'টাচ বাটন লুকান' : 'টাচ বাটন দেখান'}
-                className={`comic-btn-sm flex h-10 w-10 items-center justify-center rounded-xl ${
+                className={`comic-btn-sm flex h-9 w-9 items-center justify-center rounded-xl sm:h-10 sm:w-10 ${
                   showTouchControls
                     ? 'bg-lime-400 text-stone-950 rotate-2'
                     : 'bg-stone-200 text-stone-700'
@@ -169,9 +187,49 @@ export function StartModal({
 
               <button
                 type="button"
+                onClick={onToggleAtmosphere}
+                title="আকাশ ও আবহাওয়া বদলান (দিন / সন্ধ্যা / বৃষ্টি)"
+                className={`comic-btn-sm flex h-9 items-center gap-1 rounded-xl px-2 text-[11px] font-black text-stone-950 whitespace-nowrap sm:h-10 sm:px-2.5 sm:text-xs ${
+                  atmosphereMode === 'rain'
+                    ? 'bg-cyan-300 -rotate-1'
+                    : atmosphereMode === 'evening'
+                    ? 'bg-orange-400 rotate-1'
+                    : 'bg-yellow-300 -rotate-1'
+                }`}
+              >
+                {atmosphereMode === 'rain' ? (
+                  <CloudRain className="h-4 w-4 stroke-[2.5]" />
+                ) : atmosphereMode === 'evening' ? (
+                  <Sunset className="h-4 w-4 stroke-[2.5]" />
+                ) : (
+                  <Sun className="h-4 w-4 stroke-[2.5]" />
+                )}
+                <span>
+                  {atmosphereMode === 'rain'
+                    ? 'বৃষ্টি'
+                    : atmosphereMode === 'evening'
+                    ? 'সন্ধ্যা'
+                    : 'দিন'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onToggleGraphics}
+                title="গ্রাফিক্স কোয়ালিটি (উচ্চ / নিম্ন)"
+                className={`comic-btn-sm flex h-9 items-center gap-1 rounded-xl px-2 text-[11px] font-black text-stone-950 whitespace-nowrap sm:h-10 sm:px-2.5 sm:text-xs ${
+                  graphicsQuality === 'high' ? 'bg-emerald-300' : 'bg-stone-200'
+                }`}
+              >
+                <Gauge className="h-4 w-4 stroke-[2.5]" />
+                <span>{graphicsQuality === 'high' ? 'উচ্চ' : 'নিম্ন'}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={onToggleCamera}
                 title="শুরুর ক্যামেরা ভিউ বদলান"
-                className="comic-btn-sm flex h-10 items-center gap-1 rounded-xl bg-amber-300 px-2.5 text-xs font-black text-stone-950 -rotate-1 whitespace-nowrap"
+                className="comic-btn-sm flex h-9 items-center gap-1 rounded-xl bg-amber-300 px-2 text-xs font-black text-stone-950 -rotate-1 whitespace-nowrap sm:h-10 sm:px-2.5"
               >
                 <Camera className="h-4 w-4 stroke-[2.5]" />
                 <span className="hidden sm:inline">
@@ -183,7 +241,7 @@ export function StartModal({
                 type="button"
                 onClick={onToggleCleanMode}
                 title={cleanMode ? 'ক্লিন মোড বন্ধ করুন' : 'ক্লিন মোড চালু করুন'}
-                className={`comic-btn-sm flex h-10 items-center gap-1 rounded-xl px-2.5 text-xs font-black text-stone-950 whitespace-nowrap ${
+                className={`comic-btn-sm flex h-9 items-center gap-1 rounded-xl px-2 text-[11px] font-black text-stone-950 whitespace-nowrap sm:h-10 sm:px-2.5 sm:text-xs ${
                   cleanMode ? 'bg-cyan-400 rotate-1' : 'bg-stone-200'
                 }`}
               >
@@ -192,7 +250,7 @@ export function StartModal({
                 ) : (
                   <Eye className="h-4 w-4 stroke-[2.5]" />
                 )}
-                <span>ক্লিন মোড</span>
+                <span className="hidden sm:inline">ক্লিন মোড</span>
               </button>
             </div>
 

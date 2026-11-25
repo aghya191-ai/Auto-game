@@ -8,6 +8,10 @@ export type TrafficLightState = 'green' | 'yellow' | 'red';
 
 export type WeatherCondition = 'sunny' | 'rainy' | 'foggy';
 
+export type AtmosphereMode = 'day' | 'evening' | 'rain';
+
+export type GraphicsQuality = 'low' | 'high';
+
 export type VehicleKind =
   | 'bus'
   | 'truck'
@@ -156,6 +160,8 @@ export interface HudSnapshot {
   aheadHazard: { label: string; sub: string; dist: number } | null;
   aheadTrafficLight: { state: TrafficLightState; dist: number; timeLeft: number } | null;
   weather: WeatherCondition;
+  atmosphereMode: AtmosphereMode;
+  graphicsQuality: GraphicsQuality;
   soundBombCooldown: number;
   radarEntities: RadarEntity[];
 }

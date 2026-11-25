@@ -1,11 +1,11 @@
 import {
   AlertTriangle,
   Camera,
-  CloudFog,
   CloudRain,
   Eye,
   EyeOff,
   Flame,
+  Gauge,
   Heart,
   Menu,
   Music,
@@ -17,6 +17,7 @@ import {
   Smartphone,
   Star,
   Sun,
+  Sunset,
   Target,
   UserCheck,
   Volume2,
@@ -57,7 +58,8 @@ interface HUDProps {
   onToggleRadio: () => void;
   onNextRadioClip: () => void;
   onToggleCamera: () => void;
-  onToggleWeather: () => void;
+  onToggleAtmosphere: () => void;
+  onToggleGraphics: () => void;
   onTogglePause: () => void;
   onToggleTouch: () => void;
   onToggleCleanMode: () => void;
@@ -85,7 +87,8 @@ export function HUD({
   onToggleRadio,
   onNextRadioClip,
   onToggleCamera,
-  onToggleWeather,
+  onToggleAtmosphere,
+  onToggleGraphics,
   onTogglePause,
   onToggleTouch,
   onToggleCleanMode,
@@ -379,23 +382,29 @@ export function HUD({
 
               <button
                 type="button"
-                onClick={onToggleWeather}
+                onClick={onToggleAtmosphere}
                 className={`comic-btn-sm flex h-8 items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-black whitespace-nowrap ${
-                  hud.weather === 'rainy'
+                  hud.atmosphereMode === 'rain'
                     ? 'bg-cyan-300'
-                    : hud.weather === 'foggy'
-                    ? 'bg-stone-200'
+                    : hud.atmosphereMode === 'evening'
+                    ? 'bg-orange-400'
                     : 'bg-yellow-300'
                 }`}
               >
-                {hud.weather === 'rainy' ? (
+                {hud.atmosphereMode === 'rain' ? (
                   <CloudRain className="h-3.5 w-3.5" />
-                ) : hud.weather === 'foggy' ? (
-                  <CloudFog className="h-3.5 w-3.5" />
+                ) : hud.atmosphereMode === 'evening' ? (
+                  <Sunset className="h-3.5 w-3.5" />
                 ) : (
                   <Sun className="h-3.5 w-3.5" />
                 )}
-                <span>{hud.weather === 'rainy' ? 'বৃষ্টি' : hud.weather === 'foggy' ? 'কুয়াশা' : 'রোদ'}</span>
+                <span>
+                  {hud.atmosphereMode === 'rain'
+                    ? 'বৃষ্টি'
+                    : hud.atmosphereMode === 'evening'
+                    ? 'সন্ধ্যা'
+                    : 'দিন'}
+                </span>
               </button>
 
               <button
@@ -465,6 +474,19 @@ export function HUD({
               >
                 <Target className="h-3.5 w-3.5" />
                 <span>মিশন</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onToggleGraphics}
+                className={`comic-btn-sm col-span-2 flex h-8 items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] font-black whitespace-nowrap ${
+                  hud.graphicsQuality === 'high' ? 'bg-emerald-300' : 'bg-stone-200'
+                }`}
+              >
+                <Gauge className="h-3.5 w-3.5" />
+                <span>
+                  গ্রাফিক্স: {hud.graphicsQuality === 'high' ? 'উচ্চ (High)' : 'নিম্ন (Low)'}
+                </span>
               </button>
             </div>
           )}
@@ -646,7 +668,7 @@ export function HUD({
       {/* Desktop Keyboard Hint above Ticker */}
       {!cleanMode && !showTouchControls && phase === 'playing' && !isDriverView && (
         <div className="sticker-chip mx-auto mb-1 hidden rounded-lg bg-[#fef6df]/90 px-2.5 py-0.5 text-[11px] font-black text-stone-950 md:block">
-          W/A/S/D বা তীর: চালানো · Shift: বুস্ট · H: হর্ন · B: শব্দবোমা · C: ক্যামেরা · T: আবহাওয়া · R: রেডিও · V: পেছনে
+          W/A/S/D বা তীর: চালানো · Shift: বুস্ট · H: হর্ন · B: শব্দবোমা · C: ক্যামেরা · T: দিন/সন্ধ্যা/বৃষ্টি · R: রেডিও · V: পেছনে
         </div>
       )}
 

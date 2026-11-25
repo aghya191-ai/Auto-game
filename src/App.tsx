@@ -67,6 +67,8 @@ const INITIAL_HUD: HudSnapshot = {
   aheadTrafficLight: null,
   soundBombCooldown: 0,
   weather: 'sunny',
+  atmosphereMode: 'day',
+  graphicsQuality: 'high',
   radarEntities: [],
 };
 
@@ -472,8 +474,8 @@ export default function App() {
         engineRef.current.triggerSoundBomb();
       } else if (code === 'KeyC' && isDown && !e.repeat) {
         handleToggleCamera();
-      } else if (code === 'KeyT' && isDown && !e.repeat && phase === 'playing') {
-        engineRef.current.toggleWeather();
+      } else if (code === 'KeyT' && isDown && !e.repeat && (phase === 'playing' || phase === 'menu')) {
+        engineRef.current.toggleAtmosphereMode();
       } else if (code === 'KeyR' && isDown && !e.repeat && phase === 'playing') {
         handleToggleRadio();
       } else if (code === 'Escape' && isDown && !e.repeat) {
@@ -783,7 +785,8 @@ export default function App() {
           onToggleRadio={handleToggleRadio}
           onNextRadioClip={() => triggerRadioBroadcast(undefined, true)}
           onToggleCamera={handleToggleCamera}
-          onToggleWeather={() => engineRef.current?.toggleWeather()}
+          onToggleAtmosphere={() => engineRef.current?.toggleAtmosphereMode()}
+          onToggleGraphics={() => engineRef.current?.toggleGraphicsQuality()}
           onTogglePause={handleTogglePause}
           onToggleTouch={() => setShowTouchControls((v) => !v)}
           onToggleCleanMode={() => setCleanMode((v) => !v)}
@@ -827,6 +830,8 @@ export default function App() {
             streakClaimedToday={save.lastStreakClaimDate === getTodayKey()}
             startAreaIndex={startAreaIndex}
             cameraMode={hud.cameraMode}
+            atmosphereMode={hud.atmosphereMode}
+            graphicsQuality={hud.graphicsQuality}
             missions={save.missions}
             unclaimedMissions={unclaimedMissions}
             muted={muted}
@@ -836,6 +841,8 @@ export default function App() {
             cleanMode={cleanMode}
             onSelectArea={handleSelectStartArea}
             onToggleCamera={handleToggleCamera}
+            onToggleAtmosphere={() => engineRef.current?.toggleAtmosphereMode()}
+            onToggleGraphics={() => engineRef.current?.toggleGraphicsQuality()}
             onToggleMute={handleToggleMute}
             onToggleMusic={handleToggleMusic}
             onToggleRadio={handleToggleRadio}

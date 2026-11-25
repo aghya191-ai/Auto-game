@@ -7,16 +7,20 @@ import {
   SATIRE_HEADLINES,
 } from '../config/chattogramData';
 import type {
+  AtmosphereMode,
   CameraMode,
   DeathReason,
   GameEventToast,
   GameOverSummary,
   GamePhase,
+  GraphicsQuality,
   HudSnapshot,
   InputState,
   MissionMetric,
   RadarEntity,
+  TrafficLightState,
   VehicleKind,
+  WeatherCondition,
 } from '../types/game';
 import { SoundEngine } from '../audio/soundEngine';
 import {
@@ -42,14 +46,23 @@ import {
   type TrafficLightRig,
   type TrafficModelRig,
 } from './models';
-import type { TrafficLightState, WeatherCondition } from '../types/game';
-import { createMedianCurbTexture, createRoadTexture, createSidewalkTexture } from './textures';
+import {
+  createLightGlowTexture,
+  createMedianCurbTexture,
+  createRoadTextureSet,
+  createSidewalkTexture,
+} from './textures';
 import { toBn } from '../utils/bengaliDigits';
 
 // Reusable module-scope math helpers (Zero GC in render loop)
-const _targetSky = new THREE.Color();
-const _targetFog = new THREE.Color();
-const _weatherTint = new THREE.Color();
+const _targetTop = new THREE.Color();
+const _targetHorizon = new THREE.Color();
+const _targetSmog = new THREE.Color();
+const _targetSunCol = new THREE.Color();
+const _targetHemiSky = new THREE.Color();
+const _targetHemiGround = new THREE.Color();
+const _targetSunLightCol = new THREE.Color();
+const _targetSunDir = new THREE.Vector3();
 const _camTargetPos = new THREE.Vector3();
 const _camLookAt = new THREE.Vector3();
 
@@ -142,8 +155,24 @@ export class GameEngine {
   private camera!: THREE.PerspectiveCamera;
   private hemiLight!: THREE.HemisphereLight;
   private sunLight!: THREE.DirectionalLight;
+  private rimLight!: THREE.DirectionalLight;
+  private skyMesh!: THREE.Mesh;
+  private skyUniforms!: {
+    uTopColor: { value: THREE.Color };
+    uHorizonColor: { value: THREE.Color };
+    uSmogColor: { value: THREE.Color };
+    uSunColor: { value: THREE.Color };
+    uSunDir: { value: THREE.Vector3 };
+    uSunIntensity: { value: number };
+    uSmogStrength: { value: number };
+  };
   private roadMatPlain!: THREE.MeshStandardMaterial;
   private roadMatZebra!: THREE.MeshStandardMaterial;
+  private roadBumpPlain!: THREE.CanvasTexture;
+  private roadBumpZebra!: THREE.CanvasTexture;
+  private streetBulbMat!: THREE.MeshStandardMaterial;
+  private streetGlowMat!: THREE.SpriteMaterial;
+  private streetPoolMat!: THREE.MeshBasicMaterial;
   private rainLines!: THREE.LineSegments;
   private rainPositions!: Float32Array;
   private isSoftwareGl = false;
@@ -161,6 +190,9 @@ export class GameEngine {
 
   private phase: GamePhase = 'menu';
   private cameraMode: CameraMode = 'external';
+  private atmosphereMode: AtmosphereMode = 'day';
+  private baseTimeMode: 'day' | 'evening' = 'day';
+  private graphicsQuality: GraphicsQuality = 'high';
   private weather: WeatherCondition = 'sunny';
   private weatherTimer = 24;
   private input: InputState = {
@@ -304,62 +336,165 @@ export class GameEngine {
   private initScene(): void {
     this.scene = new THREE.Scene();
     const startArea = AREAS[0];
-    this.scene.background = new THREE.Color(startArea.skyColor);
-    this.scene.fog = new THREE.FogExp2(startArea.fogColor, 0.0092);
+    this.scene.background = new THREE.Color('#dec68d');
+    this.scene.fog = new THREE.FogExp2('#dec68d', 0.0086);
 
     const width = this.container.clientWidth || window.innerWidth;
     const height = this.container.clientHeight || window.innerHeight;
-    this.camera = new THREE.PerspectiveCamera(60, width / height, 0.08, 260);
+    this.camera = new THREE.PerspectiveCamera(60, width / height, 0.08, 280);
     this.camera.position.set(0, 4.4, 7.6);
+
+    // Procedural Sky Dome: dusty yellow-beige gradient, warm hazy sun, thin horizon smog band
+    this.skyUniforms = {
+      uTopColor: { value: new THREE.Color('#93aabd') },
+      uHorizonColor: { value: new THREE.Color('#e7d39f') },
+      uSmogColor: { value: new THREE.Color('#dec68d') },
+      uSunColor: { value: new THREE.Color('#fff2c2') },
+      uSunDir: { value: new THREE.Vector3(0.26, 0.24, -1.0).normalize() },
+      uSunIntensity: { value: 1.0 },
+      uSmogStrength: { value: 0.86 },
+    };
+    const skyMat = new THREE.ShaderMaterial({
+      uniforms: this.skyUniforms,
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false,
+      toneMapped: true,
+      vertexShader: `
+        varying vec3 vLocalDir;
+        void main() {
+          vLocalDir = normalize(position);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vLocalDir;
+        uniform vec3 uTopColor;
+        uniform vec3 uHorizonColor;
+        uniform vec3 uSmogColor;
+        uniform vec3 uSunColor;
+        uniform vec3 uSunDir;
+        uniform float uSunIntensity;
+        uniform float uSmogStrength;
+
+        void main() {
+          vec3 dir = normalize(vLocalDir);
+          float h = clamp(dir.y, -0.15, 1.0);
+          vec3 sky = mix(uHorizonColor, uTopColor, smoothstep(0.0, 0.56, max(h, 0.0)));
+          float smogBand = exp(-abs(h - 0.022) * 17.0) * uSmogStrength;
+          float lowHaze = smoothstep(0.16, -0.02, h) * 0.44 * uSmogStrength;
+          sky = mix(sky, uSmogColor, clamp(smogBand + lowHaze, 0.0, 0.94));
+
+          vec3 sDir = normalize(uSunDir);
+          float sunDot = max(dot(dir, sDir), 0.0);
+          float halo = pow(sunDot, 7.0) * 0.34 + pow(sunDot, 36.0) * 0.44;
+          float disc = smoothstep(0.9942, 0.9988, sunDot) * 0.95;
+          sky += uSunColor * (halo + disc) * uSunIntensity;
+
+          gl_FragColor = vec4(sky, 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }
+      `,
+    });
+    this.skyMesh = new THREE.Mesh(new THREE.SphereGeometry(235, 24, 16), skyMat);
+    this.skyMesh.frustumCulled = false;
+    this.scene.add(this.skyMesh);
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     pmrem.dispose();
 
-    this.hemiLight = new THREE.HemisphereLight('#e0f2fe', '#57534e', 1.05);
+    this.hemiLight = new THREE.HemisphereLight('#f5e6bf', '#574c3f', 1.15);
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight('#fffbeb', 1.55);
-    this.sunLight.position.set(18, 34, 16);
-    this.sunLight.castShadow = !this.isSoftwareGl;
+    // Warm directional sun with soft shadows scoped tightly around the player's CNG
+    this.sunLight = new THREE.DirectionalLight('#fff2cf', 1.65);
+    this.sunLight.position.set(10, 17, 9);
+    this.sunLight.castShadow = !this.isSoftwareGl && this.graphicsQuality === 'high';
     this.sunLight.shadow.mapSize.width = 1024;
     this.sunLight.shadow.mapSize.height = 1024;
     this.sunLight.shadow.camera.near = 2;
-    this.sunLight.shadow.camera.far = 90;
-    this.sunLight.shadow.camera.left = -24;
-    this.sunLight.shadow.camera.right = 24;
-    this.sunLight.shadow.camera.top = 24;
-    this.sunLight.shadow.camera.bottom = -24;
-    this.sunLight.shadow.bias = -0.0005;
-    this.sunLight.shadow.normalBias = 0.02;
+    this.sunLight.shadow.camera.far = 42;
+    this.sunLight.shadow.camera.left = -6;
+    this.sunLight.shadow.camera.right = 6;
+    this.sunLight.shadow.camera.top = 7;
+    this.sunLight.shadow.camera.bottom = -7;
+    this.sunLight.shadow.radius = 3.5;
+    this.sunLight.shadow.bias = -0.0006;
+    this.sunLight.shadow.normalBias = 0.025;
     this.scene.add(this.sunLight);
+    this.scene.add(this.sunLight.target);
 
-    const rim = new THREE.DirectionalLight('#bae6fd', 0.45);
-    rim.position.set(-14, 10, -24);
-    this.scene.add(rim);
+    this.rimLight = new THREE.DirectionalLight('#fde68a', 0.42);
+    this.rimLight.position.set(-14, 10, -24);
+    this.scene.add(this.rimLight);
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(360, 420),
-      new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.95 })
+      new THREE.MeshStandardMaterial({ color: '#786957', roughness: 0.96 })
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(0, -0.04, -70);
     ground.receiveShadow = true;
     this.scene.add(ground);
 
-    const roadTexPlain = createRoadTexture(this.maxAnisotropy, false);
-    const roadTexZebra = createRoadTexture(this.maxAnisotropy, true);
+    const roadPlainSet = createRoadTextureSet(this.maxAnisotropy, false);
+    const roadZebraSet = createRoadTextureSet(this.maxAnisotropy, true);
+    this.roadBumpPlain = roadPlainSet.bumpMap;
+    this.roadBumpZebra = roadZebraSet.bumpMap;
     const sideTexLeft = createSidewalkTexture(this.maxAnisotropy, -1);
     const sideTexRight = createSidewalkTexture(this.maxAnisotropy, 1);
     const curbTex = createMedianCurbTexture(this.maxAnisotropy);
     curbTex.repeat.set(1, 5);
-    this.roadMatPlain = new THREE.MeshStandardMaterial({ map: roadTexPlain, roughness: 0.86, metalness: 0.04 });
-    this.roadMatZebra = new THREE.MeshStandardMaterial({ map: roadTexZebra, roughness: 0.86, metalness: 0.04 });
+    this.roadMatPlain = new THREE.MeshStandardMaterial({
+      map: roadPlainSet.map,
+      roughnessMap: roadPlainSet.roughnessMap,
+      bumpMap: this.roadBumpPlain,
+      bumpScale: 0.032,
+      roughness: 0.94,
+      metalness: 0.04,
+      envMapIntensity: 1.2,
+    });
+    this.roadMatZebra = new THREE.MeshStandardMaterial({
+      map: roadZebraSet.map,
+      roughnessMap: roadZebraSet.roughnessMap,
+      bumpMap: this.roadBumpZebra,
+      bumpScale: 0.032,
+      roughness: 0.94,
+      metalness: 0.04,
+      envMapIntensity: 1.2,
+    });
     const roadMatPlain = this.roadMatPlain;
     const roadMatZebra = this.roadMatZebra;
-    const sideMatLeft = new THREE.MeshStandardMaterial({ map: sideTexLeft, roughness: 0.9 });
-    const sideMatRight = new THREE.MeshStandardMaterial({ map: sideTexRight, roughness: 0.9 });
+    const sideMatLeft = new THREE.MeshStandardMaterial({ map: sideTexLeft, roughness: 0.92 });
+    const sideMatRight = new THREE.MeshStandardMaterial({ map: sideTexRight, roughness: 0.92 });
     const curbEdgeMat = new THREE.MeshStandardMaterial({ map: curbTex, roughness: 0.72 });
+
+    // Shared street light materials so all chunks respond together in day/evening/rain
+    const glowTex = createLightGlowTexture();
+    this.streetBulbMat = new THREE.MeshStandardMaterial({
+      color: '#fef08a',
+      emissive: '#fbbf24',
+      emissiveIntensity: 0.28,
+      roughness: 0.2,
+    });
+    this.streetGlowMat = new THREE.SpriteMaterial({
+      map: glowTex,
+      color: '#fbbf24',
+      transparent: true,
+      opacity: 0.05,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this.streetPoolMat = new THREE.MeshBasicMaterial({
+      map: glowTex,
+      color: '#f59e0b',
+      transparent: true,
+      opacity: 0.0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
 
     // Procedural 3D Rain Streak System (Zero GC per-frame buffer updates)
     this.rainPositions = new Float32Array(RAIN_COUNT * 6);
@@ -380,7 +515,7 @@ export class GameEngine {
     const rainMat = new THREE.LineBasicMaterial({
       color: '#cbd5e1',
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.58,
     });
     this.rainLines = new THREE.LineSegments(rainGeo, rainMat);
     this.rainLines.visible = false;
@@ -389,7 +524,7 @@ export class GameEngine {
 
     const CHUNK_LEN = 45;
     const CHUNK_COUNT = 6;
-    const curbEdgeGeo = new THREE.BoxGeometry(0.32, 0.24, CHUNK_LEN);
+    const curbEdgeGeo = new THREE.BoxGeometry(0.36, 0.3, CHUNK_LEN);
     for (let i = 0; i < CHUNK_COUNT; i++) {
       const chunkGroup = new THREE.Group();
       const hasZebra = i % 2 === 1;
@@ -401,20 +536,20 @@ export class GameEngine {
       roadMesh.position.y = 0;
       roadMesh.receiveShadow = true;
 
-      const leftWalk = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.18, CHUNK_LEN), sideMatLeft);
-      leftWalk.position.set(-10.6, 0.07, 0);
+      const leftWalk = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.22, CHUNK_LEN), sideMatLeft);
+      leftWalk.position.set(-10.6, 0.09, 0);
       leftWalk.receiveShadow = true;
 
-      const rightWalk = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.18, CHUNK_LEN), sideMatRight);
-      rightWalk.position.set(10.6, 0.07, 0);
+      const rightWalk = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.22, CHUNK_LEN), sideMatRight);
+      rightWalk.position.set(10.6, 0.09, 0);
       rightWalk.receiveShadow = true;
 
       const leftCurb = new THREE.Mesh(curbEdgeGeo, curbEdgeMat);
-      leftCurb.position.set(-8.66, 0.12, 0);
+      leftCurb.position.set(-8.66, 0.15, 0);
       leftCurb.receiveShadow = true;
 
       const rightCurb = new THREE.Mesh(curbEdgeGeo, curbEdgeMat);
-      rightCurb.position.set(8.66, 0.12, 0);
+      rightCurb.position.set(8.66, 0.15, 0);
       rightCurb.receiveShadow = true;
 
       chunkGroup.add(roadMesh, leftWalk, rightWalk, leftCurb, rightCurb);
@@ -436,10 +571,10 @@ export class GameEngine {
       const polesAndWires = createUtilityPoleCluster(i % 2 === 0);
       chunkGroup.add(polesAndWires);
 
-      // Street lights on both sidewalks
-      const lightL = createStreetLight(-1);
+      // Street lights on both sidewalks with shared bloom-like glow & ground pool
+      const lightL = createStreetLight(-1, this.streetBulbMat, this.streetGlowMat, this.streetPoolMat);
       lightL.position.set(-9.4, 0, -14);
-      const lightR = createStreetLight(1);
+      const lightR = createStreetLight(1, this.streetBulbMat, this.streetGlowMat, this.streetPoolMat);
       lightR.position.set(9.4, 0, 14);
       chunkGroup.add(lightL, lightR);
 
@@ -693,9 +828,6 @@ export class GameEngine {
     this.startAreaIndex = Math.max(0, Math.min(AREAS.length - 1, idx));
     if (this.phase === 'menu') {
       this.areaIndex = this.startAreaIndex;
-      const area = AREAS[this.areaIndex];
-      (this.scene.background as THREE.Color).set(area.skyColor);
-      if (this.scene.fog) this.scene.fog.color.set(area.fogColor);
       this.roadChunks.forEach((chunk, i) => {
         this.rebuildChunkScenery(chunk, i, 45);
       });
@@ -740,6 +872,78 @@ export class GameEngine {
     return next;
   }
 
+  public setAtmosphereMode(mode: AtmosphereMode, announce = true): void {
+    this.atmosphereMode = mode;
+    if (mode === 'day' || mode === 'evening') {
+      this.baseTimeMode = mode;
+      this.applyWeather('sunny', false);
+    } else {
+      this.applyWeather('rainy', false);
+    }
+
+    if (announce) {
+      if (mode === 'evening') {
+        this.callbacks.onToast({
+          text: 'সন্ধ্যার কমলা আকাশ ও রাস্তার আলো জ্বলে উঠেছে 🌆',
+          tone: 'warning',
+          priority: 'radio',
+        });
+      } else if (mode === 'rain') {
+        this.callbacks.onToast({
+          text: 'ঝুম বৃষ্টি! ভেজা রাস্তায় ব্রেক ও টার্নে সাবধান 🌧️',
+          tone: 'info',
+          priority: 'radio',
+        });
+      } else {
+        this.callbacks.onToast({
+          text: 'দিনের উজ্জ্বল ধুলোমাখা আকাশ ফিরে এসেছে ☀️',
+          tone: 'success',
+          priority: 'radio',
+        });
+      }
+    }
+    this.emitHud();
+  }
+
+  public toggleAtmosphereMode(): AtmosphereMode {
+    const order: AtmosphereMode[] = ['day', 'evening', 'rain'];
+    const next = order[(order.indexOf(this.atmosphereMode) + 1) % order.length];
+    this.setAtmosphereMode(next, this.phase === 'playing');
+    return next;
+  }
+
+  public setGraphicsQuality(quality: GraphicsQuality): void {
+    this.graphicsQuality = quality;
+    const isHigh = quality === 'high';
+    this.renderer.setPixelRatio(
+      !isHigh || this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2)
+    );
+    this.renderer.shadowMap.enabled = isHigh && !this.isSoftwareGl;
+    this.sunLight.castShadow = isHigh && !this.isSoftwareGl;
+    this.roadMatPlain.bumpMap = isHigh ? this.roadBumpPlain : null;
+    this.roadMatZebra.bumpMap = isHigh ? this.roadBumpZebra : null;
+    this.roadMatPlain.needsUpdate = true;
+    this.roadMatZebra.needsUpdate = true;
+    this.rainLines.geometry.setDrawRange(
+      0,
+      isHigh ? RAIN_COUNT * 2 : Math.floor(RAIN_COUNT * 0.45) * 2
+    );
+    this.emitHud();
+  }
+
+  public toggleGraphicsQuality(): GraphicsQuality {
+    const next: GraphicsQuality = this.graphicsQuality === 'high' ? 'low' : 'high';
+    this.setGraphicsQuality(next);
+    if (this.phase === 'playing') {
+      this.callbacks.onToast({
+        text: next === 'high' ? 'গ্রাফিক্স: উচ্চ (High) ✨' : 'গ্রাফিক্স: নিম্ন (60fps মোড) ⚡',
+        tone: 'info',
+        priority: 'radio',
+      });
+    }
+    return next;
+  }
+
   public toggleWeather(): WeatherCondition {
     const order: WeatherCondition[] = ['sunny', 'rainy', 'foggy'];
     const next = order[(order.indexOf(this.weather) + 1) % order.length];
@@ -751,7 +955,12 @@ export class GameEngine {
     this.weather = next;
     this.weatherTimer = 22 + Math.random() * 14;
     this.rainLines.visible = next === 'rainy';
-    this.sound.setWeatherRain(next === 'rainy');
+    this.sound.setWeatherRain(next === 'rainy' && this.phase === 'playing');
+    if (next === 'rainy') {
+      this.atmosphereMode = 'rain';
+    } else if (next === 'sunny') {
+      this.atmosphereMode = this.baseTimeMode;
+    }
 
     if (announce) {
       if (next === 'rainy') {
@@ -766,7 +975,7 @@ export class GameEngine {
         });
       } else {
         this.callbacks.onToast({
-          text: 'রোদেলা আবহাওয়া ফিরে এসেছে — রাস্তা শুকনো ও পরিষ্কার ☀️',
+          text: 'আবহাওয়া পরিষ্কার হয়েছে — রাস্তা শুকনো ☀️',
           tone: 'success',
         });
       }
@@ -781,20 +990,12 @@ export class GameEngine {
       this.sound.setWeatherRain(this.weather === 'rainy');
     } else {
       this.sound.stopEngine();
+      this.sound.setWeatherRain(false);
       if (next === 'menu' || next === 'garage') {
         this.clearDynamicEntities();
-        this.weather = 'sunny';
-        this.rainLines.visible = false;
-        this.sound.setWeatherRain(false);
-        this.roadMatPlain.roughness = 0.86;
-        this.roadMatPlain.metalness = 0.04;
-        this.roadMatZebra.roughness = 0.86;
-        this.roadMatZebra.metalness = 0.04;
-        if (this.scene.fog instanceof THREE.FogExp2) {
-          this.scene.fog.density = 0.0085;
-        }
-        this.sunLight.intensity = 1.55;
-        this.hemiLight.intensity = 1.05;
+        const wantRain = this.atmosphereMode === 'rain';
+        this.weather = wantRain ? 'rainy' : 'sunny';
+        this.rainLines.visible = wantRain;
         this.cngRig.group.position.set(next === 'menu' ? 2.8 : 0, 0, 0);
         this.cngRig.group.rotation.set(0, 0, 0);
         this.cngRig.bodyGroup.rotation.set(0, 0, 0);
@@ -841,19 +1042,11 @@ export class GameEngine {
     this.boostMissionAccum = 0;
     this.distMissionAccum = 0;
 
-    this.weather = 'sunny';
+    const wantRain = this.atmosphereMode === 'rain';
+    this.weather = wantRain ? 'rainy' : 'sunny';
     this.weatherTimer = 18 + Math.random() * 12;
-    this.rainLines.visible = false;
-    this.sound.setWeatherRain(false);
-    this.roadMatPlain.roughness = 0.86;
-    this.roadMatPlain.metalness = 0.04;
-    this.roadMatZebra.roughness = 0.86;
-    this.roadMatZebra.metalness = 0.04;
-    if (this.scene.fog instanceof THREE.FogExp2) {
-      this.scene.fog.density = 0.0085;
-    }
-    this.sunLight.intensity = 1.55;
-    this.hemiLight.intensity = 1.05;
+    this.rainLines.visible = wantRain;
+    this.sound.setWeatherRain(wantRain);
 
     this.cngRig.group.position.set(this.playerX, 0, 0);
     this.cngRig.group.rotation.set(0, 0, 0);
@@ -861,9 +1054,6 @@ export class GameEngine {
     this.cngRig.group.visible = true;
 
     const firstArea = AREAS[this.areaIndex];
-    (this.scene.background as THREE.Color).set(firstArea.skyColor);
-    if (this.scene.fog) this.scene.fog.color.set(firstArea.fogColor);
-
     this.roadChunks.forEach((chunk, idx) => {
       this.rebuildChunkScenery(chunk, idx, 45);
     });
@@ -1240,9 +1430,204 @@ export class GameEngine {
       aheadHazard,
       aheadTrafficLight,
       weather: this.weather,
+      atmosphereMode: this.atmosphereMode,
+      graphicsQuality: this.graphicsQuality,
       soundBombCooldown: Math.max(0, Math.ceil(this.soundBombCooldown)),
       radarEntities,
     });
+  }
+
+  private updateAtmosphereAndLighting(dt: number): void {
+    const isRain = this.atmosphereMode === 'rain' || this.weather === 'rainy';
+    const isEvening = !isRain && this.atmosphereMode === 'evening';
+    const isFoggy = !isRain && this.weather === 'foggy';
+    const isHigh = this.graphicsQuality === 'high';
+
+    // Center sky dome on camera so horizon never clips
+    this.skyMesh.position.set(this.camera.position.x, 0, this.camera.position.z - 20);
+
+    // Scope directional shadow frustum tightly around the player's CNG
+    const focusX = this.phase === 'garage' ? 0 : this.playerX;
+    this.sunLight.target.position.set(focusX, 0, -1.5);
+    this.sunLight.target.updateMatrixWorld();
+
+    let targetFogDensity = 0.0085;
+    let targetSunLightInt = 1.65;
+    let targetHemiInt = 1.15;
+    let targetSunVis = 1.0;
+    let targetSmog = 0.86;
+    let targetRoadRough = 0.94;
+    let targetRoadMetal = 0.04;
+    let targetEnvInt = 1.2;
+    let targetStreetEmissive = 0.25;
+    let targetStreetGlow = 0.05;
+    let targetStreetPool = 0.0;
+    let targetCngGlow = 0.16;
+
+    if (isRain) {
+      _targetTop.set('#363f4b');
+      _targetHorizon.set('#5e6975');
+      _targetSmog.set('#545f6b');
+      _targetSunCol.set('#cbd5e1');
+      _targetSunDir.set(0.24, 0.28, -1.0).normalize();
+      _targetSunLightCol.set('#cbd5e1');
+      _targetHemiSky.set('#94a3b8');
+      _targetHemiGround.set('#334155');
+      this.sunLight.position.set(focusX + 8, 17, 9);
+
+      targetFogDensity = 0.0175;
+      targetSunLightInt = 0.72;
+      targetHemiInt = 0.92;
+      targetSunVis = 0.08;
+      targetSmog = 0.94;
+      targetRoadRough = 0.20;
+      targetRoadMetal = 0.18;
+      targetEnvInt = 1.95;
+      targetStreetEmissive = 2.7;
+      targetStreetGlow = 0.72;
+      targetStreetPool = isHigh ? 0.24 : 0.0;
+      targetCngGlow = 0.85;
+    } else if (isEvening) {
+      _targetTop.set('#38284c');
+      _targetHorizon.set('#f4903c');
+      _targetSmog.set('#d96c38');
+      _targetSunCol.set('#ffedd5');
+      _targetSunDir.set(0.20, 0.11, -1.0).normalize();
+      _targetSunLightCol.set('#ff9b52');
+      _targetHemiSky.set('#fdba74');
+      _targetHemiGround.set('#422006');
+      this.sunLight.position.set(focusX + 10, 12, 8);
+
+      targetFogDensity = isFoggy ? 0.036 : 0.0095;
+      targetSunLightInt = isFoggy ? 0.78 : 1.38;
+      targetHemiInt = 0.9;
+      targetSunVis = isFoggy ? 0.35 : 1.15;
+      targetSmog = 0.92;
+      targetRoadRough = isFoggy ? 0.65 : 0.88;
+      targetRoadMetal = 0.08;
+      targetEnvInt = 1.35;
+      targetStreetEmissive = 3.2;
+      targetStreetGlow = 0.88;
+      targetStreetPool = isHigh ? 0.30 : 0.0;
+      targetCngGlow = 0.95;
+    } else {
+      // Dusty yellow-beige Chattogram daytime
+      _targetTop.set('#93aabd');
+      _targetHorizon.set('#e7d39f');
+      _targetSmog.set('#dec68d');
+      _targetSunCol.set('#fff2c2');
+      _targetSunDir.set(0.26, 0.24, -1.0).normalize();
+      _targetSunLightCol.set('#fff2cf');
+      _targetHemiSky.set('#f5e6bf');
+      _targetHemiGround.set('#574c3f');
+      this.sunLight.position.set(focusX + 10, 17, 9);
+
+      targetFogDensity = isFoggy ? 0.036 : 0.0085;
+      targetSunLightInt = isFoggy ? 0.68 : 1.65;
+      targetHemiInt = isFoggy ? 0.98 : 1.15;
+      targetSunVis = isFoggy ? 0.32 : 1.0;
+      targetSmog = isFoggy ? 1.0 : 0.86;
+      targetRoadRough = isFoggy ? 0.68 : 0.94;
+      targetRoadMetal = isFoggy ? 0.08 : 0.04;
+      targetEnvInt = 1.2;
+      targetStreetEmissive = isFoggy ? 1.5 : 0.25;
+      targetStreetGlow = isFoggy ? 0.45 : 0.05;
+      targetStreetPool = isFoggy && isHigh ? 0.08 : 0.0;
+      targetCngGlow = isFoggy ? 0.52 : 0.16;
+    }
+
+    const blend = Math.min(1, dt * 2.4);
+    this.skyUniforms.uTopColor.value.lerp(_targetTop, blend);
+    this.skyUniforms.uHorizonColor.value.lerp(_targetHorizon, blend);
+    this.skyUniforms.uSmogColor.value.lerp(_targetSmog, blend);
+    this.skyUniforms.uSunColor.value.lerp(_targetSunCol, blend);
+    this.skyUniforms.uSunDir.value.lerp(_targetSunDir, blend).normalize();
+    this.skyUniforms.uSunIntensity.value = THREE.MathUtils.damp(
+      this.skyUniforms.uSunIntensity.value,
+      targetSunVis,
+      2.6,
+      dt
+    );
+    this.skyUniforms.uSmogStrength.value = THREE.MathUtils.damp(
+      this.skyUniforms.uSmogStrength.value,
+      targetSmog,
+      2.6,
+      dt
+    );
+
+    (this.scene.background as THREE.Color).lerp(_targetSmog, blend);
+    if (this.scene.fog instanceof THREE.FogExp2) {
+      this.scene.fog.color.lerp(_targetSmog, blend);
+      this.scene.fog.density = THREE.MathUtils.damp(this.scene.fog.density, targetFogDensity, 2.2, dt);
+    }
+
+    this.sunLight.color.lerp(_targetSunLightCol, blend);
+    this.sunLight.intensity = THREE.MathUtils.damp(this.sunLight.intensity, targetSunLightInt, 2.4, dt);
+    this.hemiLight.color.lerp(_targetHemiSky, blend);
+    this.hemiLight.groundColor.lerp(_targetHemiGround, blend);
+    this.hemiLight.intensity = THREE.MathUtils.damp(this.hemiLight.intensity, targetHemiInt, 2.4, dt);
+    this.rimLight.color.lerp(_targetHorizon, blend);
+
+    this.roadMatPlain.roughness = THREE.MathUtils.damp(this.roadMatPlain.roughness, targetRoadRough, 2.5, dt);
+    this.roadMatZebra.roughness = this.roadMatPlain.roughness;
+    this.roadMatPlain.metalness = THREE.MathUtils.damp(this.roadMatPlain.metalness, targetRoadMetal, 2.5, dt);
+    this.roadMatZebra.metalness = this.roadMatPlain.metalness;
+    this.roadMatPlain.envMapIntensity = THREE.MathUtils.damp(
+      this.roadMatPlain.envMapIntensity,
+      targetEnvInt,
+      2.5,
+      dt
+    );
+    this.roadMatZebra.envMapIntensity = this.roadMatPlain.envMapIntensity;
+
+    this.streetBulbMat.emissiveIntensity = THREE.MathUtils.damp(
+      this.streetBulbMat.emissiveIntensity,
+      targetStreetEmissive,
+      3.0,
+      dt
+    );
+    this.streetGlowMat.opacity = THREE.MathUtils.damp(
+      this.streetGlowMat.opacity,
+      targetStreetGlow,
+      3.0,
+      dt
+    );
+    this.streetPoolMat.opacity = THREE.MathUtils.damp(
+      this.streetPoolMat.opacity,
+      targetStreetPool,
+      3.0,
+      dt
+    );
+    this.cngRig.setLightsGlow(targetCngGlow);
+
+    if (this.rainLines.visible) {
+      const posAttr = this.rainLines.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const arr = this.rainPositions;
+      const activeCount = isHigh ? RAIN_COUNT : Math.floor(RAIN_COUNT * 0.45);
+      const speedRef = this.phase === 'playing' ? this.playerSpeed : 4;
+      const fallY = 26 * dt;
+      const slantZ = (1.6 + speedRef * 0.35) * dt;
+      for (let i = 0; i < activeCount; i++) {
+        const idx = i * 6;
+        arr[idx + 1] -= fallY;
+        arr[idx + 4] -= fallY;
+        arr[idx + 2] += slantZ;
+        arr[idx + 5] += slantZ;
+
+        if (arr[idx + 1] < 0 || arr[idx + 2] > 12) {
+          const rx = focusX + (Math.random() - 0.5) * 26;
+          const ry = 10 + Math.random() * 5;
+          const rz = -34 + Math.random() * 40;
+          arr[idx] = rx;
+          arr[idx + 1] = ry;
+          arr[idx + 2] = rz;
+          arr[idx + 3] = rx - 0.09;
+          arr[idx + 4] = ry + 0.72;
+          arr[idx + 5] = rz - (0.18 + speedRef * 0.012);
+        }
+      }
+      posAttr.needsUpdate = true;
+    }
   }
 
   private stepGameplay(dt: number): void {
@@ -1404,67 +1789,8 @@ export class GameEngine {
       this.callbacks.onMissionProgress('areas', 1);
     }
 
-    // Smooth sky, fog, lighting, road wetness & 3D rain particle transition
-    _targetSky.set(AREAS[this.areaIndex].skyColor);
-    _targetFog.set(AREAS[this.areaIndex].fogColor);
-    if (this.weather === 'rainy') {
-      _weatherTint.set('#64748b');
-      _targetSky.lerp(_weatherTint, 0.65);
-      _weatherTint.set('#7b8a9e');
-      _targetFog.lerp(_weatherTint, 0.68);
-    } else if (this.weather === 'foggy') {
-      _weatherTint.set('#cbd5e1');
-      _targetSky.lerp(_weatherTint, 0.84);
-      _weatherTint.set('#d7dfe8');
-      _targetFog.lerp(_weatherTint, 0.88);
-    }
-
-    (this.scene.background as THREE.Color).lerp(_targetSky, Math.min(1, dt * 1.4));
-    if (this.scene.fog instanceof THREE.FogExp2) {
-      this.scene.fog.color.lerp(_targetFog, Math.min(1, dt * 1.4));
-      const targetDensity =
-        this.weather === 'foggy' ? 0.036 : this.weather === 'rainy' ? 0.0165 : 0.0085;
-      this.scene.fog.density = THREE.MathUtils.damp(this.scene.fog.density, targetDensity, 1.8, dt);
-    }
-
-    const targetSun = this.weather === 'foggy' ? 0.58 : this.weather === 'rainy' ? 0.78 : 1.55;
-    const targetHemi = this.weather === 'foggy' ? 0.96 : this.weather === 'rainy' ? 0.88 : 1.05;
-    this.sunLight.intensity = THREE.MathUtils.damp(this.sunLight.intensity, targetSun, 2.0, dt);
-    this.hemiLight.intensity = THREE.MathUtils.damp(this.hemiLight.intensity, targetHemi, 2.0, dt);
-
-    const targetRoadRough = this.weather === 'rainy' ? 0.24 : this.weather === 'foggy' ? 0.62 : 0.86;
-    const targetRoadMetal = this.weather === 'rainy' ? 0.25 : this.weather === 'foggy' ? 0.08 : 0.04;
-    this.roadMatPlain.roughness = THREE.MathUtils.damp(this.roadMatPlain.roughness, targetRoadRough, 2.2, dt);
-    this.roadMatZebra.roughness = this.roadMatPlain.roughness;
-    this.roadMatPlain.metalness = THREE.MathUtils.damp(this.roadMatPlain.metalness, targetRoadMetal, 2.2, dt);
-    this.roadMatZebra.metalness = this.roadMatPlain.metalness;
-
-    if (this.rainLines.visible) {
-      const posAttr = this.rainLines.geometry.getAttribute('position') as THREE.BufferAttribute;
-      const arr = this.rainPositions;
-      const fallY = 26 * dt;
-      const slantZ = (1.6 + this.playerSpeed * 0.35) * dt;
-      for (let i = 0; i < RAIN_COUNT; i++) {
-        const idx = i * 6;
-        arr[idx + 1] -= fallY;
-        arr[idx + 4] -= fallY;
-        arr[idx + 2] += slantZ;
-        arr[idx + 5] += slantZ;
-
-        if (arr[idx + 1] < 0 || arr[idx + 2] > 12) {
-          const rx = this.playerX + (Math.random() - 0.5) * 26;
-          const ry = 10 + Math.random() * 5;
-          const rz = -34 + Math.random() * 40;
-          arr[idx] = rx;
-          arr[idx + 1] = ry;
-          arr[idx + 2] = rz;
-          arr[idx + 3] = rx - 0.09;
-          arr[idx + 4] = ry + 0.72;
-          arr[idx + 5] = rz - (0.18 + this.playerSpeed * 0.012);
-        }
-      }
-      posAttr.needsUpdate = true;
-    }
+    // Smooth dusty sky dome, horizon smog, tight CNG shadow tracking, road wetness & rain
+    this.updateAtmosphereAndLighting(dt);
 
     // Gas consumption (gentle idle drain when stopped at red light)
     const gasDrain =
@@ -2083,6 +2409,8 @@ export class GameEngine {
       this.camera.lookAt(_camLookAt);
     }
 
+    this.updateAtmosphereAndLighting(dt);
+
     const t = performance.now();
     this.cngRig.group.visible = true;
     this.cngRig.boostFlameLeft.visible = false;
@@ -2144,6 +2472,9 @@ export class GameEngine {
 
     this.sound.dispose();
 
+    this.roadBumpPlain?.dispose();
+    this.roadBumpZebra?.dispose();
+
     this.scene.traverse((obj) => {
       if ((obj as THREE.Mesh).isMesh) {
         const mesh = obj as THREE.Mesh;
@@ -2153,6 +2484,8 @@ export class GameEngine {
           if (!m) continue;
           const std = m as THREE.MeshStandardMaterial;
           std.map?.dispose();
+          std.roughnessMap?.dispose();
+          std.bumpMap?.dispose();
           m.dispose();
         }
       }

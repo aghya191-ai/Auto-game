@@ -8,6 +8,7 @@ import {
   createBuildingFacadeTexture,
   createBusSignTexture,
   createContactShadowTexture,
+  createLightGlowTexture,
   createMedianCurbTexture,
   createMedianTopTexture,
   createNumberPlateTexture,
@@ -29,6 +30,14 @@ function getContactShadowTex(): THREE.CanvasTexture {
   return sharedContactShadowTex;
 }
 
+let sharedLightGlowTex: THREE.CanvasTexture | null = null;
+function getLightGlowTex(): THREE.CanvasTexture {
+  if (!sharedLightGlowTex) {
+    sharedLightGlowTex = createLightGlowTexture();
+  }
+  return sharedLightGlowTex;
+}
+
 export interface CngRig {
   group: THREE.Group;
   bodyGroup: THREE.Group;
@@ -38,6 +47,7 @@ export interface CngRig {
   boostFlameLeft: THREE.Mesh;
   boostFlameRight: THREE.Mesh;
   updateAppearance: (colorHex: string, sticker: CngStickerOption, maxAnisotropy: number) => void;
+  setLightsGlow: (strength: number) => void;
 }
 
 export function createCngModel(
@@ -281,28 +291,63 @@ export function createCngModel(
   const headMat = new THREE.MeshStandardMaterial({
     color: '#fef9c3',
     emissive: '#facc15',
-    emissiveIntensity: 1.2,
+    emissiveIntensity: 1.35,
     roughness: 0.2,
   });
   const tailMat = new THREE.MeshStandardMaterial({
     color: '#ef4444',
     emissive: '#dc2626',
-    emissiveIntensity: 1.1,
+    emissiveIntensity: 1.35,
     roughness: 0.2,
+  });
+  const headGlowMat = new THREE.SpriteMaterial({
+    map: getLightGlowTex(),
+    color: '#fde68a',
+    transparent: true,
+    opacity: 0.22,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const tailGlowMat = new THREE.SpriteMaterial({
+    map: getLightGlowTex(),
+    color: '#ef4444',
+    transparent: true,
+    opacity: 0.34,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const beamMat = new THREE.MeshBasicMaterial({
+    map: getLightGlowTex(),
+    color: '#fef08a',
+    transparent: true,
+    opacity: 0.08,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
   });
 
   [-0.36, 0.36].forEach((x) => {
     const hl = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.08, 12), headMat);
     hl.rotation.x = Math.PI / 2;
     hl.position.set(x, 0.88, -1.26);
-    bodyGroup.add(hl);
+    const glow = new THREE.Sprite(headGlowMat);
+    glow.position.set(x, 0.88, -1.32);
+    glow.scale.set(0.7, 0.7, 1);
+    bodyGroup.add(hl, glow);
   });
+
+  const headBeamPool = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 7.5), beamMat);
+  headBeamPool.rotation.x = -Math.PI / 2;
+  headBeamPool.position.set(0, 0.03, -4.8);
+  group.add(headBeamPool);
 
   [-0.56, 0.56].forEach((x) => {
     const tl = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.1, 0.06), tailMat);
     tl.position.set(x, 0.86, 1.48);
     tl.rotation.z = x < 0 ? -0.22 : 0.22;
-    bodyGroup.add(tl);
+    const glow = new THREE.Sprite(tailGlowMat);
+    glow.position.set(x, 0.86, 1.54);
+    glow.scale.set(0.65, 0.52, 1);
+    bodyGroup.add(tl, glow);
   });
 
   [-0.64, 0.64].forEach((x) => {
@@ -352,6 +397,14 @@ export function createCngModel(
     mat.needsUpdate = true;
   };
 
+  const setLightsGlow = (strength: number) => {
+    headMat.emissiveIntensity = 0.8 + strength * 2.2;
+    tailMat.emissiveIntensity = 1.0 + strength * 1.4;
+    headGlowMat.opacity = 0.16 + strength * 0.62;
+    tailGlowMat.opacity = 0.28 + strength * 0.5;
+    beamMat.opacity = strength * 0.22;
+  };
+
   return {
     group,
     bodyGroup,
@@ -361,6 +414,7 @@ export function createCngModel(
     boostFlameLeft,
     boostFlameRight,
     updateAppearance,
+    setLightsGlow,
   };
 }
 
@@ -1407,14 +1461,41 @@ export function createRoadsideStall(variant: number, maxAnisotropy: number): THR
   return group;
 }
 
-export function createStreetLight(side: -1 | 1): THREE.Group {
+export function createStreetLight(
+  side: -1 | 1,
+  sharedBulbMat?: THREE.MeshStandardMaterial,
+  sharedGlowMat?: THREE.SpriteMaterial,
+  sharedPoolMat?: THREE.MeshBasicMaterial
+): THREE.Group {
   const group = new THREE.Group();
   const poleMat = new THREE.MeshStandardMaterial({ color: '#475569', roughness: 0.45, metalness: 0.7 });
-  const bulbMat = new THREE.MeshStandardMaterial({
-    color: '#fef08a',
-    emissive: '#facc15',
-    emissiveIntensity: 1.1,
-  });
+  const bulbMat =
+    sharedBulbMat ??
+    new THREE.MeshStandardMaterial({
+      color: '#fef08a',
+      emissive: '#fbbf24',
+      emissiveIntensity: 0.4,
+    });
+  const glowMat =
+    sharedGlowMat ??
+    new THREE.SpriteMaterial({
+      map: getLightGlowTex(),
+      color: '#fbbf24',
+      transparent: true,
+      opacity: 0.12,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+  const poolMat =
+    sharedPoolMat ??
+    new THREE.MeshBasicMaterial({
+      map: getLightGlowTex(),
+      color: '#f59e0b',
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
 
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.13, 6.2, 8), poleMat);
   pole.position.y = 3.1;
@@ -1423,7 +1504,15 @@ export function createStreetLight(side: -1 | 1): THREE.Group {
   const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.25), bulbMat);
   lamp.position.set(-side * 1.5, 5.95, 0);
 
-  group.add(pole, arm, lamp);
+  const glowSprite = new THREE.Sprite(glowMat);
+  glowSprite.position.set(-side * 1.5, 5.82, 0);
+  glowSprite.scale.set(2.9, 2.5, 1);
+
+  const groundPool = new THREE.Mesh(new THREE.PlaneGeometry(5.8, 5.8), poolMat);
+  groundPool.rotation.x = -Math.PI / 2;
+  groundPool.position.set(-side * 1.65, 0.025, 0);
+
+  group.add(pole, arm, lamp, glowSprite, groundPool);
   return group;
 }
 
@@ -1771,6 +1860,31 @@ export function createTrafficLightModel(maxAnisotropy: number): TrafficLightRig 
   signFace.position.set(0, 5.15, 0.07);
   group.add(signBoard, signFace);
 
+  const redGlowMat = new THREE.SpriteMaterial({
+    map: getLightGlowTex(),
+    color: '#ff4d4d',
+    transparent: true,
+    opacity: 0.0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const yellowGlowMat = new THREE.SpriteMaterial({
+    map: getLightGlowTex(),
+    color: '#fbbf24',
+    transparent: true,
+    opacity: 0.0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const greenGlowMat = new THREE.SpriteMaterial({
+    map: getLightGlowTex(),
+    color: '#4ade80',
+    transparent: true,
+    opacity: 0.0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+
   // Helper to assemble a multi-part hooded 3-aspect signal head
   const buildSignalHead = (x: number, y: number, z: number, scale = 1) => {
     const head = new THREE.Group();
@@ -1785,16 +1899,20 @@ export function createTrafficLightModel(maxAnisotropy: number): TrafficLightRig 
     body.castShadow = true;
     head.add(backplate, body);
 
-    const lampSpecs: { y: number; mat: THREE.MeshStandardMaterial }[] = [
-      { y: 0.52, mat: redMat },
-      { y: 0.0, mat: yellowMat },
-      { y: -0.52, mat: greenMat },
+    const lampSpecs: { y: number; mat: THREE.MeshStandardMaterial; glowMat: THREE.SpriteMaterial }[] = [
+      { y: 0.52, mat: redMat, glowMat: redGlowMat },
+      { y: 0.0, mat: yellowMat, glowMat: yellowGlowMat },
+      { y: -0.52, mat: greenMat, glowMat: greenGlowMat },
     ];
 
     for (const spec of lampSpecs) {
       const lens = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 10), spec.mat);
       lens.scale.set(1, 1, 0.45);
       lens.position.set(0, spec.y, 0.16);
+
+      const halo = new THREE.Sprite(spec.glowMat);
+      halo.position.set(0, spec.y, 0.28);
+      halo.scale.set(0.95, 0.95, 1);
 
       // Protective top hood/visor over each lens
       const visor = new THREE.Mesh(
@@ -1804,7 +1922,7 @@ export function createTrafficLightModel(maxAnisotropy: number): TrafficLightRig 
       visor.rotation.x = Math.PI / 2;
       visor.position.set(0, spec.y + 0.03, 0.26);
 
-      head.add(lens, visor);
+      head.add(lens, halo, visor);
     }
 
     group.add(head);
@@ -1838,25 +1956,34 @@ export function createTrafficLightModel(maxAnisotropy: number): TrafficLightRig 
   const setState = (state: TrafficLightState) => {
     if (state === 'red') {
       redMat.color.set('#ff3b3b');
-      redMat.emissiveIntensity = 2.6;
+      redMat.emissiveIntensity = 2.8;
+      redGlowMat.opacity = 0.82;
       yellowMat.color.set('#451a03');
       yellowMat.emissiveIntensity = 0.08;
+      yellowGlowMat.opacity = 0.0;
       greenMat.color.set('#052e16');
       greenMat.emissiveIntensity = 0.08;
+      greenGlowMat.opacity = 0.0;
     } else if (state === 'yellow') {
       redMat.color.set('#450a0a');
       redMat.emissiveIntensity = 0.08;
+      redGlowMat.opacity = 0.0;
       yellowMat.color.set('#fbbf24');
-      yellowMat.emissiveIntensity = 2.5;
+      yellowMat.emissiveIntensity = 2.7;
+      yellowGlowMat.opacity = 0.8;
       greenMat.color.set('#052e16');
       greenMat.emissiveIntensity = 0.08;
+      greenGlowMat.opacity = 0.0;
     } else {
       redMat.color.set('#450a0a');
       redMat.emissiveIntensity = 0.08;
+      redGlowMat.opacity = 0.0;
       yellowMat.color.set('#451a03');
       yellowMat.emissiveIntensity = 0.08;
+      yellowGlowMat.opacity = 0.0;
       greenMat.color.set('#22c55e');
-      greenMat.emissiveIntensity = 2.5;
+      greenMat.emissiveIntensity = 2.7;
+      greenGlowMat.opacity = 0.8;
     }
   };
 
