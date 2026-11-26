@@ -70,11 +70,14 @@ const _camTargetPos = new THREE.Vector3();
 const _camLookAt = new THREE.Vector3();
 const _puffDummy = new THREE.Object3D();
 const _dustDummy = new THREE.Object3D();
+const _debrisDummy = new THREE.Object3D();
+const _debrisColor = new THREE.Color();
 
 const LANES = [-6.0, -2.8, 2.8, 6.0];
 const RAIN_COUNT = 340;
 const PUFF_COUNT = 28;
-const DUST_COUNT = 36;
+const DUST_COUNT = 44;
+const DEBRIS_COUNT = 40;
 const MAX_DETAILED_PEDESTRIANS = 25;
 
 interface LodEntry {
@@ -90,6 +93,25 @@ interface ExhaustPuff {
   vx: number;
   vy: number;
   vz: number;
+  age: number;
+  maxAge: number;
+}
+
+interface DebrisParticle {
+  active: boolean;
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  rx: number;
+  ry: number;
+  rz: number;
+  vrx: number;
+  vry: number;
+  vrz: number;
+  scale: number;
   age: number;
   maxAge: number;
 }
@@ -226,6 +248,10 @@ export class GameEngine {
   private dustMesh!: THREE.InstancedMesh;
   private dustPool: ExhaustPuff[] = [];
   private dustCursor = 0;
+  private debrisMesh!: THREE.InstancedMesh;
+  private debrisPool: DebrisParticle[] = [];
+  private debrisCursor = 0;
+  private wheelDustAccum = 0;
   private lodScratch: LodEntry[] = [];
   private leftMirrorRT!: THREE.WebGLRenderTarget;
   private rightMirrorRT!: THREE.WebGLRenderTarget;
@@ -267,8 +293,11 @@ export class GameEngine {
   private playerX = 2.8;
   private lateralVel = 0;
   private playerSpeed = 0;
+  private prevPlayerSpeed = 0;
   private playerRoll = 0;
+  private playerPitch = 0;
   private steerDir: -1 | 0 | 1 = 0;
+  private steerSmoothed = 0;
   private handlebarAngle = 0;
   private ornamentPhase = 0;
   private lookYaw = 0;
@@ -298,6 +327,12 @@ export class GameEngine {
   private invulnTimer = 0;
   private dividerCooldown = 0;
   private shakeTimer = 0;
+  private shakeTrauma = 0;
+  private slowMoTimer = 0;
+  private slowMoDuration = 0.34;
+  private gameoverImpactTimer = 0;
+  private boostFovKick = 0;
+  private wasBoosting = false;
   private hornZoomPulse = 0;
   private hornCooldown = 0;
   private soundBombCooldown = 0;
@@ -313,6 +348,8 @@ export class GameEngine {
   private distMissionAccum = 0;
   private gasZoneSoundCooldown = 0;
   private orbitAngle = 0;
+  private animTime = 0;
+  private realTime = 0;
   private startAreaIndex = 0;
 
   private frameId = 0;
@@ -757,6 +794,48 @@ export class GameEngine {
     this.dustMesh.instanceMatrix.needsUpdate = true;
     this.scene.add(this.dustMesh);
 
+    // Pooled Crash Debris Chunks InstancedMesh (Zero GC)
+    const debrisGeo = new THREE.DodecahedronGeometry(0.12, 0);
+    const debrisMat = new THREE.MeshStandardMaterial({
+      color: '#ffffff',
+      roughness: 0.55,
+      metalness: 0.25,
+      flatShading: true,
+    });
+    this.debrisMesh = new THREE.InstancedMesh(debrisGeo, debrisMat, DEBRIS_COUNT);
+    this.debrisMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.debrisMesh.frustumCulled = false;
+    _debrisDummy.scale.setScalar(0);
+    _debrisDummy.updateMatrix();
+    const debrisPalette = ['#16a34a', '#facc15', '#ef4444', '#94a3b8', '#27272a', '#bae6fd'];
+    this.debrisPool = [];
+    for (let i = 0; i < DEBRIS_COUNT; i++) {
+      this.debrisPool.push({
+        active: false,
+        x: 0,
+        y: 0,
+        z: 0,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        rx: 0,
+        ry: 0,
+        rz: 0,
+        vrx: 0,
+        vry: 0,
+        vrz: 0,
+        scale: 1,
+        age: 0,
+        maxAge: 0.85,
+      });
+      this.debrisMesh.setMatrixAt(i, _debrisDummy.matrix);
+      _debrisColor.set(debrisPalette[i % debrisPalette.length]);
+      this.debrisMesh.setColorAt(i, _debrisColor);
+    }
+    this.debrisMesh.instanceMatrix.needsUpdate = true;
+    if (this.debrisMesh.instanceColor) this.debrisMesh.instanceColor.needsUpdate = true;
+    this.scene.add(this.debrisMesh);
+
     if (!this.isSoftwareGl) {
       this.renderer.compile(this.scene, this.camera);
     }
@@ -907,7 +986,8 @@ export class GameEngine {
     if (this.phase !== 'playing') return;
     if (this.soundBombCooldown > 0) return;
     this.soundBombCooldown = 10.0;
-    this.shakeTimer = 0.22;
+    this.shakeTimer = 0.24;
+    this.shakeTrauma = Math.max(this.shakeTrauma, 0.6);
     this.hornZoomPulse = 1.5;
     this.vibrate([30, 20, 45]);
     this.sound.playHorn();
@@ -1137,7 +1217,12 @@ export class GameEngine {
     this.playerX = 2.8;
     this.lateralVel = 0;
     this.playerSpeed = 16;
+    this.prevPlayerSpeed = 16;
     this.playerRoll = 0;
+    this.playerPitch = 0;
+    this.steerSmoothed = 0;
+    this.handlebarAngle = 0;
+    this.cngRig.setSteerAngle(0);
     this.gas = 100;
     this.hp = 100;
     this.wanted = 0;
@@ -1158,6 +1243,12 @@ export class GameEngine {
     this.invulnTimer = 0;
     this.dividerCooldown = 0;
     this.shakeTimer = 0;
+    this.shakeTrauma = 0;
+    this.slowMoTimer = 0;
+    this.gameoverImpactTimer = 0;
+    this.boostFovKick = 0;
+    this.wasBoosting = false;
+    this.wheelDustAccum = 0;
     this.soundBombCooldown = 0;
     this.trafficSpawnTimer = 0.25;
     this.jamCooldown = 12;
@@ -1215,6 +1306,7 @@ export class GameEngine {
     this.trafficLights = [];
     this.resetExhaustPuffs();
     this.resetDustPuffs();
+    this.resetDebrisParticles();
   }
 
   private resetExhaustPuffs(): void {
@@ -1237,6 +1329,90 @@ export class GameEngine {
       this.dustMesh.setMatrixAt(i, _dustDummy.matrix);
     }
     this.dustMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  private resetDebrisParticles(): void {
+    if (!this.debrisMesh) return;
+    _debrisDummy.scale.setScalar(0);
+    _debrisDummy.updateMatrix();
+    for (let i = 0; i < this.debrisPool.length; i++) {
+      this.debrisPool[i].active = false;
+      this.debrisMesh.setMatrixAt(i, _debrisDummy.matrix);
+    }
+    this.debrisMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  private spawnDebrisBurst(x: number, y: number, z: number, count = 12, power = 1): void {
+    if (!this.debrisMesh) return;
+    for (let i = 0; i < count; i++) {
+      const p = this.debrisPool[this.debrisCursor];
+      this.debrisCursor = (this.debrisCursor + 1) % DEBRIS_COUNT;
+      const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.7;
+      const spd = (2.4 + Math.random() * 4.2) * power;
+      p.active = true;
+      p.x = x + (Math.random() - 0.5) * 0.55;
+      p.y = y + Math.random() * 0.45;
+      p.z = z + (Math.random() - 0.5) * 0.55;
+      p.vx = Math.cos(angle) * spd;
+      p.vy = (2.8 + Math.random() * 3.6) * power;
+      p.vz = Math.sin(angle) * spd + (Math.random() - 0.3) * 3.5;
+      p.rx = Math.random() * Math.PI;
+      p.ry = Math.random() * Math.PI;
+      p.rz = Math.random() * Math.PI;
+      p.vrx = (Math.random() - 0.5) * 18;
+      p.vry = (Math.random() - 0.5) * 18;
+      p.vrz = (Math.random() - 0.5) * 18;
+      p.scale = 0.65 + Math.random() * 0.9;
+      p.age = 0;
+      p.maxAge = 0.75 + Math.random() * 0.45;
+    }
+  }
+
+  private updateDebrisParticles(dt: number, distStep: number): void {
+    if (!this.debrisMesh) return;
+    let dirty = false;
+    for (let i = 0; i < DEBRIS_COUNT; i++) {
+      const p = this.debrisPool[i];
+      if (!p.active) continue;
+      p.age += dt;
+      if (p.age >= p.maxAge) {
+        p.active = false;
+        _debrisDummy.scale.setScalar(0);
+        _debrisDummy.updateMatrix();
+        this.debrisMesh.setMatrixAt(i, _debrisDummy.matrix);
+        dirty = true;
+        continue;
+      }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy -= 14.5 * dt;
+      p.z += p.vz * dt + distStep;
+      if (p.y < 0.08) {
+        p.y = 0.08;
+        p.vy = Math.abs(p.vy) * 0.38;
+        p.vx *= 0.72;
+        p.vz *= 0.72;
+      }
+      p.rx += p.vrx * dt;
+      p.ry += p.vry * dt;
+      p.rz += p.vrz * dt;
+      const t = p.age / p.maxAge;
+      const s = p.scale * (t > 0.75 ? Math.max(0.01, (1 - t) * 4) : 1);
+      _debrisDummy.position.set(p.x, p.y, p.z);
+      _debrisDummy.rotation.set(p.rx, p.ry, p.rz);
+      _debrisDummy.scale.setScalar(s);
+      _debrisDummy.updateMatrix();
+      this.debrisMesh.setMatrixAt(i, _debrisDummy.matrix);
+      dirty = true;
+    }
+    if (dirty) {
+      this.debrisMesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  private triggerCrashSlowMo(duration = 0.34): void {
+    this.slowMoDuration = duration;
+    this.slowMoTimer = duration;
   }
 
   private spawnDustBurst(x: number, y: number, z: number, count = 8): void {
@@ -1729,6 +1905,10 @@ export class GameEngine {
     this.cngRig.group.visible = true;
     this.syncCameraVisibility();
     this.resetExhaustPuffs();
+    this.shakeTrauma = 1.0;
+    this.gameoverImpactTimer = 0.55;
+    this.spawnDustBurst(this.playerX, 0.35, 0, 14);
+    this.spawnDebrisBurst(this.playerX, 0.65, -0.2, 20, 1.4);
     this.sound.stopEngine();
     this.sound.playCrash(true);
     this.vibrate([80, 35, 110]);
@@ -2101,17 +2281,18 @@ export class GameEngine {
     }
   }
 
-  private stepGameplay(dt: number): void {
+  private stepGameplay(dt: number, realDt: number): void {
     const area = AREAS[this.areaIndex];
     const loopMult = 1 + (this.loopCount - 1) * 0.22;
 
     if (this.invulnTimer > 0) this.invulnTimer -= dt;
     if (this.dividerCooldown > 0) this.dividerCooldown -= dt;
-    if (this.shakeTimer > 0) this.shakeTimer -= dt;
-    if (this.hornCooldown > 0) this.hornCooldown -= dt;
-    if (this.soundBombCooldown > 0) this.soundBombCooldown = Math.max(0, this.soundBombCooldown - dt);
-    if (this.trafficHornCooldown > 0) this.trafficHornCooldown -= dt;
-    if (this.gasZoneSoundCooldown > 0) this.gasZoneSoundCooldown -= dt;
+    if (this.shakeTimer > 0) this.shakeTimer -= realDt;
+    if (this.shakeTrauma > 0) this.shakeTrauma = Math.max(0, this.shakeTrauma - realDt * 2.35);
+    if (this.hornCooldown > 0) this.hornCooldown -= realDt;
+    if (this.soundBombCooldown > 0) this.soundBombCooldown = Math.max(0, this.soundBombCooldown - realDt);
+    if (this.trafficHornCooldown > 0) this.trafficHornCooldown -= realDt;
+    if (this.gasZoneSoundCooldown > 0) this.gasZoneSoundCooldown -= realDt;
 
     // Random weather cycling during gameplay
     this.weatherTimer -= dt;
@@ -2125,6 +2306,12 @@ export class GameEngine {
 
     // Speed & Boost physics (Weather impacts traction, braking distance & top speed)
     const boosting = this.input.boost && this.gas > 2;
+    if (boosting && !this.wasBoosting) {
+      this.boostFovKick = 1.0;
+      this.vibrate(14);
+    }
+    this.wasBoosting = boosting;
+
     const weatherSpeedMult = this.weather === 'foggy' ? 0.92 : 1.0;
     const maxSpeed =
       (boosting ? 50 : 35) *
@@ -2137,6 +2324,7 @@ export class GameEngine {
     const brakeDamp = this.weather === 'rainy' ? 4.3 : this.weather === 'foggy' ? 6.8 : 9.2;
     const accelDamp = this.weather === 'rainy' ? 2.4 : 3.4;
 
+    this.prevPlayerSpeed = this.playerSpeed;
     this.playerSpeed = THREE.MathUtils.damp(
       this.playerSpeed,
       targetSpeed,
@@ -2147,10 +2335,14 @@ export class GameEngine {
       this.playerSpeed = 0;
     }
 
+    const playerAccel = (this.playerSpeed - this.prevPlayerSpeed) / Math.max(dt, 0.008);
+    const targetPitch = THREE.MathUtils.clamp(-playerAccel * 0.0032 - (boosting ? 0.025 : 0), -0.065, 0.075);
+    this.playerPitch = THREE.MathUtils.damp(this.playerPitch, targetPitch, 11, dt);
+
     this.cngRig.boostFlameLeft.visible = boosting;
     this.cngRig.boostFlameRight.visible = boosting;
     if (boosting) {
-      const flicker = 0.8 + Math.random() * 0.5;
+      const flicker = 0.8 + Math.sin(this.realTime * 52) * 0.25 + 0.15;
       this.cngRig.boostFlameLeft.scale.set(1, flicker, 1);
       this.cngRig.boostFlameRight.scale.set(1, flicker, 1);
       this.boostMissionAccum += dt;
@@ -2162,14 +2354,16 @@ export class GameEngine {
     }
     this.updateExhaustPuffs(dt, boosting);
 
-    // Steering, Wet Hydroplane Drift & Cockpit Handlebar / Ornament Animation
+    // Smooth Damped Steering, Body Lean, Front Wheel Turn & Cockpit Handlebar (Zero FPS Jitter)
     const steerInput = (this.input.right ? 1 : 0) - (this.input.left ? 1 : 0);
     this.steerDir = steerInput as -1 | 0 | 1;
+    this.steerSmoothed = THREE.MathUtils.damp(this.steerSmoothed, steerInput, 14, dt);
+
     const baseSteerSpeed = 12.0 * (0.65 + 0.35 * (this.playerSpeed / 35));
     const steerMult = this.weather === 'foggy' ? 0.88 : this.weather === 'rainy' ? 1.06 : 1.0;
     let targetLatVel = steerInput * baseSteerSpeed * steerMult;
     if (this.weather === 'rainy' && this.playerSpeed > 28) {
-      targetLatVel += Math.sin(performance.now() * 0.008) * 1.45;
+      targetLatVel += Math.sin(this.animTime * 8) * 1.45;
     }
     const latDamp = this.weather === 'rainy' ? 5.0 : this.weather === 'foggy' ? 12.5 : 18.0;
     this.lateralVel = THREE.MathUtils.damp(this.lateralVel, targetLatVel, latDamp, dt);
@@ -2181,23 +2375,44 @@ export class GameEngine {
     }
     this.playerRoll = THREE.MathUtils.damp(
       this.playerRoll,
-      -THREE.MathUtils.clamp(this.lateralVel / 12, -1.2, 1.2) * 0.14,
-      10,
+      -THREE.MathUtils.clamp(this.lateralVel / 12, -1.25, 1.25) * 0.165,
+      11,
       dt
     );
 
+    const speedRatio = Math.min(1.2, this.playerSpeed / 38);
     this.cngRig.group.position.x = this.playerX;
     this.cngRig.bodyGroup.rotation.z = this.playerRoll;
-    this.cngRig.bodyGroup.position.y = Math.sin(performance.now() * 0.04) * 0.015;
+    this.cngRig.bodyGroup.rotation.x = this.playerPitch;
+    this.cngRig.bodyGroup.position.y =
+      Math.sin(this.animTime * 36) * (0.01 + speedRatio * 0.006);
 
-    this.handlebarAngle = THREE.MathUtils.damp(this.handlebarAngle, -steerInput * 0.18, 12, dt);
+    // Physical wheel & fork turn + cockpit handlebar swing
+    this.cngRig.setSteerAngle(-this.steerSmoothed * 0.36);
+    this.handlebarAngle = -this.steerSmoothed * 0.19;
     this.cockpitRig.handlebarPivot.rotation.y = this.handlebarAngle;
     if (this.cameraMode === 'driver') {
       this.cockpitRig.updateMeter(this.playerSpeed * 2.5, this.gas, boosting);
     }
 
+    // Tire road-dust trail during hard braking, sharp cornering, or high-speed boost on dry asphalt
+    if (
+      this.weather !== 'rainy' &&
+      this.playerSpeed > 16 &&
+      (boosting || Math.abs(this.lateralVel) > 4.4 || (this.input.down && this.playerSpeed > 18))
+    ) {
+      this.wheelDustAccum += dt;
+      if (this.wheelDustAccum >= 0.06) {
+        this.wheelDustAccum = 0;
+        const side = Math.random() < 0.5 ? -0.75 : 0.75;
+        this.spawnDustBurst(this.playerX + side, 0.12, 0.95, 1);
+      }
+    } else {
+      this.wheelDustAccum = 0;
+    }
+
     this.ornamentPhase += dt * (4.5 + this.playerSpeed * 0.22);
-    const targetOrnZ = -steerInput * 0.28 + Math.sin(this.ornamentPhase) * (0.08 + (boosting ? 0.09 : 0));
+    const targetOrnZ = -this.steerSmoothed * 0.28 + Math.sin(this.ornamentPhase) * (0.08 + (boosting ? 0.09 : 0));
     const targetOrnX = (this.input.down ? -0.22 : boosting ? 0.24 : 0.06) + Math.cos(this.ornamentPhase * 0.8) * 0.05;
     this.cockpitRig.ornamentPivot.rotation.z = THREE.MathUtils.damp(
       this.cockpitRig.ornamentPivot.rotation.z,
@@ -2219,13 +2434,17 @@ export class GameEngine {
       w.rotation.x -= wheelSpin;
     }
 
-    if (this.invulnTimer > 0) {
-      this.cngRig.group.visible = Math.floor(this.invulnTimer * 16) % 2 === 0;
-    } else {
-      this.cngRig.group.visible = true;
+    this.cngRig.group.visible = true;
+    if (this.cameraMode !== 'driver') {
+      const blinkVis = this.invulnTimer <= 0 || Math.floor(this.invulnTimer * 16) % 2 === 0;
+      this.cngRig.bodyGroup.visible = blinkVis;
+      for (const w of this.cngRig.wheels) {
+        w.visible = blinkVis;
+      }
     }
 
-    this.sound.updateEngine(Math.min(1, this.playerSpeed / 40), boosting, true);
+    const chasedNow = this.pedestrians.filter((p) => p.isChasing).length;
+    this.sound.updateEngine(Math.min(1.15, this.playerSpeed / 38), boosting, true, chasedNow);
 
     const distStep = this.playerSpeed * dt;
     this.distanceMeters += distStep;
@@ -2301,11 +2520,14 @@ export class GameEngine {
         if (0 >= divMinZ && 0 <= divMaxZ && Math.abs(this.playerX) < 1.05) {
           this.dividerCooldown = 0.45;
           this.nationalDamage += 200;
-          this.shakeTimer = 0.16;
+          this.shakeTimer = 0.2;
+          this.shakeTrauma = Math.max(this.shakeTrauma, 0.56);
           this.vibrate([30, 20, 30]);
           this.callbacks.onCrashJuice?.('minor');
           this.playerSpeed = Math.max(8, this.playerSpeed * 0.72);
           this.playerX = this.playerX >= 0 ? 1.28 : -1.28;
+          this.spawnDustBurst(this.playerX, 0.2, 0, 7);
+          this.spawnDebrisBurst(this.playerX, 0.35, 0, 8, 0.8);
           this.sound.playCrash(false);
           this.triggerCrowdReaction(this.playerX, 0, 'violation', 0);
           this.callbacks.onToast({
@@ -2516,6 +2738,7 @@ export class GameEngine {
         this.hp -= 14;
         this.wanted = Math.min(5, this.wanted + 1);
         this.shakeTimer = 0.28;
+        this.shakeTrauma = Math.max(this.shakeTrauma, 0.58);
         this.vibrate([45, 25, 50]);
         this.callbacks.onCrashJuice?.('minor');
         this.sound.playRedLightPenalty();
@@ -2785,14 +3008,18 @@ export class GameEngine {
           this.hp -= 12;
           this.wanted = Math.min(5, this.wanted + 1);
           this.invulnTimer = 0.75;
-          this.shakeTimer = 0.35;
+          this.shakeTimer = 0.38;
+          this.shakeTrauma = Math.max(this.shakeTrauma, 0.88);
+          this.triggerCrashSlowMo(0.32);
           this.playerSpeed = Math.max(8, this.playerSpeed * 0.55);
           this.playerX = THREE.MathUtils.clamp(
             this.playerX + (this.playerX >= t.x ? 1.4 : -1.4),
             -7.4,
             7.4
           );
-          this.sound.playCrash(false);
+          this.spawnDustBurst(this.playerX, 0.3, -0.3, 11);
+          this.spawnDebrisBurst(this.playerX, 0.55, -0.3, 14, 1.15);
+          this.sound.playCrash(true);
           this.vibrate([45, 25, 50]);
           this.callbacks.onCrashJuice?.('minor');
           this.triggerCrowdReaction(t.x, t.z, 'crash', 1);
@@ -2937,7 +3164,8 @@ export class GameEngine {
 
           this.nationalDamage += 800;
           this.wanted = Math.min(5, this.wanted + 1);
-          this.shakeTimer = 0.22;
+          this.shakeTimer = 0.24;
+          this.shakeTrauma = Math.max(this.shakeTrauma, 0.52);
           this.vibrate([35, 20, 40]);
           this.callbacks.onCrashJuice?.('minor');
           this.sound.playCrash(false);
@@ -2952,7 +3180,10 @@ export class GameEngine {
           p.hitCooldown = 1.15;
           p.z += 2.6;
           this.hp -= 22;
-          this.shakeTimer = 0.3;
+          this.shakeTimer = 0.32;
+          this.shakeTrauma = Math.max(this.shakeTrauma, 0.74);
+          this.triggerCrashSlowMo(0.24);
+          this.spawnDustBurst(this.playerX, 0.25, 0, 9);
           this.vibrate([50, 25, 55]);
           this.callbacks.onCrashJuice?.('minor');
           this.sound.playCrash(false);
@@ -2976,23 +3207,36 @@ export class GameEngine {
     }
 
     this.updateDustPuffs(dt, distStep);
+    this.updateDebrisParticles(dt, distStep);
 
-    // Camera update (External chase cam vs Driver 1st-person cockpit cam)
-    this.hornZoomPulse = THREE.MathUtils.damp(this.hornZoomPulse, 0, 11, dt);
+    // Camera update: FOV kick on boost, smooth continuous trauma shake (frame-rate independent)
+    this.hornZoomPulse = THREE.MathUtils.damp(this.hornZoomPulse, 0, 11, realDt);
+    this.boostFovKick = THREE.MathUtils.damp(this.boostFovKick, 0, 5.2, realDt);
     const speedNorm = Math.min(1, this.playerSpeed / 48);
-    const targetFov = 58 + speedNorm * 12 + (boosting ? 4 : 0) - this.hornZoomPulse * 3.8;
-    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 8, dt);
+    const targetFov =
+      58 +
+      speedNorm * 11 +
+      (boosting ? 4.5 : 0) +
+      this.boostFovKick * 6.5 -
+      this.hornZoomPulse * 3.8;
+    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 9, realDt);
     this.camera.updateProjectionMatrix();
 
-    const boostVibX = boosting ? (Math.random() - 0.5) * 0.028 : 0;
-    const boostVibY = boosting ? (Math.random() - 0.5) * 0.024 : 0;
-    const shakeX = (this.shakeTimer > 0 ? (Math.random() - 0.5) * 0.48 : 0) + boostVibX;
-    const shakeY = (this.shakeTimer > 0 ? (Math.random() - 0.5) * 0.36 : 0) + boostVibY;
+    const traumaSq = this.shakeTrauma * this.shakeTrauma;
+    const boostVibX = boosting ? Math.sin(this.realTime * 57) * 0.014 : 0;
+    const boostVibY = boosting ? Math.cos(this.realTime * 69) * 0.012 : 0;
+    const shakeX =
+      traumaSq * (Math.sin(this.realTime * 43) * 0.24 + Math.sin(this.realTime * 79) * 0.14) +
+      boostVibX;
+    const shakeY =
+      traumaSq * (Math.cos(this.realTime * 49) * 0.18 + Math.sin(this.realTime * 87) * 0.1) +
+      boostVibY;
+    const rollShake = traumaSq * Math.sin(this.realTime * 37) * 0.045;
 
     if (this.cameraMode === 'driver') {
       if (!this.isDraggingLook) {
-        this.lookYaw = THREE.MathUtils.damp(this.lookYaw, 0, 7, dt);
-        this.lookPitch = THREE.MathUtils.damp(this.lookPitch, 0, 7, dt);
+        this.lookYaw = THREE.MathUtils.damp(this.lookYaw, 0, 7, realDt);
+        this.lookPitch = THREE.MathUtils.damp(this.lookPitch, 0, 7, realDt);
       }
 
       const eyeX = this.playerX + shakeX * 0.45;
@@ -3010,24 +3254,26 @@ export class GameEngine {
         );
       }
       this.camera.lookAt(_camLookAt);
-      this.camera.rotateZ(-this.playerRoll * 0.35);
+      this.camera.rotateZ(-this.playerRoll * 0.38 + rollShake * 0.65);
     } else if (this.input.lookBack) {
       _camTargetPos.set(this.playerX * 0.8 + shakeX, 3.6 + shakeY, -6.2);
-      this.camera.position.lerp(_camTargetPos, 1 - Math.exp(-14 * dt));
+      this.camera.position.lerp(_camTargetPos, 1 - Math.exp(-14 * realDt));
       _camLookAt.set(this.playerX * 0.9, 1.35, 12.0);
       this.camera.lookAt(_camLookAt);
+      this.camera.rotateZ(rollShake);
     } else {
       _camTargetPos.set(
         this.playerX * 0.72 + shakeX,
         4.85 + shakeY,
-        8.2 - (boosting ? 0.5 : 0)
+        8.2 - (boosting ? 0.55 : 0) - this.boostFovKick * 0.25
       );
-      this.camera.position.lerp(_camTargetPos, 1 - Math.exp(-10 * dt));
+      this.camera.position.lerp(_camTargetPos, 1 - Math.exp(-11 * realDt));
       _camLookAt.set(this.playerX * 0.85, 1.35, -8.0);
       this.camera.lookAt(_camLookAt);
+      this.camera.rotateZ(rollShake - this.playerRoll * 0.14);
     }
 
-    this.hudEmitTimer += dt;
+    this.hudEmitTimer += realDt;
     if (this.hudEmitTimer >= 0.065) {
       this.hudEmitTimer = 0;
       this.emitHud();
@@ -3124,17 +3370,48 @@ export class GameEngine {
     this.renderer.shadowMap.autoUpdate = prevShadowAuto;
   }
 
+  private stepGameOverImpact(realDt: number): void {
+    this.gameoverImpactTimer = Math.max(0, this.gameoverImpactTimer - realDt);
+    this.shakeTrauma = Math.max(0, this.shakeTrauma - realDt * 1.9);
+    const slowDt = realDt * 0.28;
+    const drift = this.playerSpeed * 0.18 * slowDt;
+    this.updateDustPuffs(slowDt, drift);
+    this.updateDebrisParticles(slowDt, drift);
+    this.cngRig.bodyGroup.rotation.z = THREE.MathUtils.damp(this.cngRig.bodyGroup.rotation.z, 0.22, 5, realDt);
+
+    const traumaSq = this.shakeTrauma * this.shakeTrauma;
+    const shakeX = traumaSq * (Math.sin(this.realTime * 41) * 0.32);
+    const shakeY = traumaSq * (Math.cos(this.realTime * 53) * 0.24);
+    _camTargetPos.set(this.playerX * 0.75 + shakeX, 4.95 + shakeY, 8.8);
+    this.camera.position.lerp(_camTargetPos, 1 - Math.exp(-9 * realDt));
+    _camLookAt.set(this.playerX * 0.85, 1.25, -4.5);
+    this.camera.lookAt(_camLookAt);
+    this.camera.rotateZ(traumaSq * Math.sin(this.realTime * 35) * 0.06);
+  }
+
   private tick = (): void => {
     if (this.disposed) return;
 
     const now = performance.now();
-    const dt = Math.min(0.05, Math.max(0.001, (now - this.lastTime) / 1000));
+    const realDt = Math.min(0.05, Math.max(0.001, (now - this.lastTime) / 1000));
     this.lastTime = now;
+    this.realTime += realDt;
 
     if (this.phase === 'playing') {
-      this.stepGameplay(dt);
+      let timeScale = 1;
+      if (this.slowMoTimer > 0) {
+        this.slowMoTimer = Math.max(0, this.slowMoTimer - realDt);
+        const progress = 1 - this.slowMoTimer / Math.max(0.01, this.slowMoDuration);
+        timeScale = 0.26 + 0.74 * (progress * progress);
+      }
+      const simDt = realDt * timeScale;
+      this.animTime += simDt;
+      this.stepGameplay(simDt, realDt);
+    } else if (this.phase === 'gameover' && (this.gameoverImpactTimer > 0 || this.shakeTrauma > 0.01)) {
+      this.stepGameOverImpact(realDt);
     } else if (this.phase === 'menu' || this.phase === 'garage') {
-      this.stepShowcase(dt);
+      this.animTime += realDt;
+      this.stepShowcase(realDt);
     }
 
     this.renderDriverMirrors();

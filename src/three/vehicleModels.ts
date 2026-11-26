@@ -265,6 +265,7 @@ export interface CngRig {
   boostFlameRight: THREE.Mesh;
   updateAppearance: (colorHex: string, sticker: CngStickerOption, maxAnisotropy: number) => void;
   setLightsGlow: (strength: number) => void;
+  setSteerAngle: (angleRad: number) => void;
 }
 
 export function createCngModel(
@@ -319,7 +320,13 @@ export function createCngModel(
   group.add(shadowPlane);
 
   const wheels: THREE.Object3D[] = [];
-  const makeWheel = (x: number, y: number, z: number, scale = 1) => {
+  const makeWheel = (
+    x: number,
+    y: number,
+    z: number,
+    scale = 1,
+    parent: THREE.Object3D = group
+  ) => {
     const wGroup = new THREE.Group();
     const tire = new THREE.Mesh(geos.tireCng, tireMat);
     tire.castShadow = true;
@@ -332,26 +339,34 @@ export function createCngModel(
     wGroup.add(tire, hub, s1, s2);
     wGroup.scale.setScalar(scale);
     wGroup.position.set(x, y, z);
-    group.add(wGroup);
+    parent.add(wGroup);
     wheels.push(wGroup);
   };
 
-  makeWheel(0, 0.3, -1.26, 0.96);
+  // Front wheel inside dedicated Y-axis steering pivot so turn angle never clashes with X-axis wheel spin
+  const frontWheelPivot = new THREE.Group();
+  frontWheelPivot.position.set(0, 0, -1.26);
+  group.add(frontWheelPivot);
+  makeWheel(0, 0.3, 0, 0.96, frontWheelPivot);
+
   makeWheel(-0.76, 0.32, 0.82, 1.04);
   makeWheel(0.76, 0.32, 0.82, 1.04);
 
-  // Front fork + curved front mudguard
+  // Front fork + curved front mudguard in matching steering pivot inside bodyGroup
+  const frontForkPivot = new THREE.Group();
+  frontForkPivot.position.set(0, 0, -1.26);
   const frontFork = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.74, 10), darkMetalMat);
-  frontFork.position.set(0, 0.65, -1.22);
+  frontFork.position.set(0, 0.65, 0.04);
   frontFork.rotation.x = -0.22;
   const frontFender = new THREE.Mesh(
     new THREE.CylinderGeometry(0.37, 0.37, 0.34, 12, 1, false, -Math.PI * 0.42, Math.PI * 0.84),
     paintMat
   );
   frontFender.rotation.z = Math.PI / 2;
-  frontFender.position.set(0, 0.34, -1.25);
+  frontFender.position.set(0, 0.34, 0.01);
   frontFender.castShadow = true;
-  bodyGroup.add(frontFork, frontFender);
+  frontForkPivot.add(frontFork, frontFender);
+  bodyGroup.add(frontForkPivot);
 
   // Chassis floor deck
   const floorDeck = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.12, 2.38), darkMetalMat);
@@ -674,6 +689,11 @@ export function createCngModel(
     beamConeMat.opacity = 0.03 + strength * 0.1;
   };
 
+  const setSteerAngle = (angleRad: number) => {
+    frontWheelPivot.rotation.y = angleRad;
+    frontForkPivot.rotation.y = angleRad;
+  };
+
   return {
     group,
     bodyGroup,
@@ -685,6 +705,7 @@ export function createCngModel(
     boostFlameRight,
     updateAppearance,
     setLightsGlow,
+    setSteerAngle,
   };
 }
 
