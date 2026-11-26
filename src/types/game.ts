@@ -54,6 +54,17 @@ export interface CngStickerOption {
   price: number;
 }
 
+export type HornSoundId = 'classic_cng' | 'truck_air_horn' | 'bicycle_bell' | 'melody_bus';
+
+export interface CngHornOption {
+  id: HornSoundId;
+  name: string;
+  label: string;
+  description: string;
+  price: number;
+  badgeBgClass: string;
+}
+
 export type MissionMetric =
   | 'distance'
   | 'areas'
@@ -138,8 +149,10 @@ export interface PlayerSaveData {
   lastStreakClaimDate: string;
   unlockedColors: string[];
   unlockedStickers: string[];
+  unlockedHorns: HornSoundId[];
   equippedColor: string;
   equippedSticker: string;
+  equippedHorn: HornSoundId;
   upgrades: CngUpgradesState;
   missionDate: string;
   missions: DailyMission[];

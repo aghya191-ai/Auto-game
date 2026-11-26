@@ -1,6 +1,7 @@
 import type {
   AreaConfig,
   CngColorOption,
+  CngHornOption,
   CngStickerOption,
   CngUpgradeConfig,
   DeathReason,
@@ -429,6 +430,41 @@ export const CNG_STICKERS: CngStickerOption[] = [
     bgHex: '#111827',
     textHex: '#f59e0b',
     price: 1000,
+  },
+];
+
+export const CNG_HORNS: CngHornOption[] = [
+  {
+    id: 'classic_cng',
+    name: 'ক্লাসিক সিএনজি হর্ন',
+    label: 'Classic CNG',
+    description: 'চেনা দুই-স্ট্রোক পিঁপ-পিঁপ হর্ন',
+    price: 0,
+    badgeBgClass: 'bg-emerald-300',
+  },
+  {
+    id: 'bicycle_bell',
+    name: 'মজার সাইকেল বেল',
+    label: 'Funny Bicycle Bell',
+    description: 'ক্রিং-ক্রিং মিষ্টি রিকশা-সাইকেল ঘণ্টা',
+    price: 300,
+    badgeBgClass: 'bg-sky-300',
+  },
+  {
+    id: 'truck_air_horn',
+    name: 'ট্রাক এয়ার হর্ন',
+    label: 'Truck Air Horn',
+    description: 'মহাসড়ক কাঁপানো গম্ভীর এয়ার হর্ন',
+    price: 450,
+    badgeBgClass: 'bg-orange-400',
+  },
+  {
+    id: 'melody_bus',
+    name: 'দেশি সুরেলা হর্ন',
+    label: 'Musical Bus Horn',
+    description: 'রাস্তাজুড়ে সুর তোলা মজাদার হর্ন',
+    price: 700,
+    badgeBgClass: 'bg-pink-300',
   },
 ];
 

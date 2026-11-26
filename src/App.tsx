@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AREAS,
   CNG_COLORS,
+  CNG_HORNS,
   CNG_STICKERS,
   CNG_UPGRADES,
   pickRadioClip,
@@ -13,6 +14,7 @@ import type {
   GameEventToast,
   GameOverSummary,
   GamePhase,
+  HornSoundId,
   HudSnapshot,
   InputState,
   MissionMetric,
@@ -439,7 +441,8 @@ export default function App() {
       initialSave.equippedColor,
       initialSave.equippedSticker,
       initialSave.highScore,
-      initialSave.upgrades
+      initialSave.upgrades,
+      initialSave.equippedHorn
     );
 
     engineRef.current = engine;
@@ -747,6 +750,28 @@ export default function App() {
       engineRef.current?.updateAppearance(next.equippedColor, next.equippedSticker);
       return next;
     });
+  };
+
+  const handleBuyOrEquipHorn = (hornId: HornSoundId) => {
+    const item = CNG_HORNS.find((h) => h.id === hornId);
+    if (!item) return;
+    const unlocked = save.unlockedHorns.includes(hornId);
+    if (!unlocked && save.taka < item.price) return;
+
+    const next: PlayerSaveData = {
+      ...save,
+      taka: unlocked ? save.taka : save.taka - item.price,
+      unlockedHorns: unlocked ? save.unlockedHorns : [...save.unlockedHorns, hornId],
+      equippedHorn: hornId,
+    };
+    savePlayerData(next);
+    setSave(next);
+    engineRef.current?.updateHorn(hornId);
+    engineRef.current?.sound.previewHorn(hornId);
+  };
+
+  const handlePreviewHorn = (hornId: HornSoundId) => {
+    engineRef.current?.sound.previewHorn(hornId);
   };
 
   const handleBuyUpgrade = (upgradeId: CngUpgradeId) => {
@@ -1079,6 +1104,8 @@ export default function App() {
           save={save}
           onBuyOrEquipColor={handleBuyOrEquipColor}
           onBuyOrEquipSticker={handleBuyOrEquipSticker}
+          onBuyOrEquipHorn={handleBuyOrEquipHorn}
+          onPreviewHorn={handlePreviewHorn}
           onBuyUpgrade={handleBuyUpgrade}
           onClose={handleCloseGarage}
         />

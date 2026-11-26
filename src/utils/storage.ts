@@ -1,5 +1,22 @@
 import { DAILY_STREAK_REWARDS, MISSION_TEMPLATES } from '../config/chattogramData';
-import type { CngUpgradesState, DailyMission, MissionMetric, PlayerSaveData } from '../types/game';
+import type {
+  CngUpgradesState,
+  DailyMission,
+  HornSoundId,
+  MissionMetric,
+  PlayerSaveData,
+} from '../types/game';
+
+const VALID_HORN_IDS: HornSoundId[] = [
+  'classic_cng',
+  'truck_air_horn',
+  'bicycle_bell',
+  'melody_bus',
+];
+
+function isValidHornId(val: unknown): val is HornSoundId {
+  return typeof val === 'string' && VALID_HORN_IDS.includes(val as HornSoundId);
+}
 
 const STORAGE_KEY = 'chattogram_express_save_v1';
 
@@ -87,8 +104,10 @@ export function loadSaveData(): PlayerSaveData {
     lastStreakClaimDate: '',
     unlockedColors: ['chittagong_green'],
     unlockedStickers: ['mayer_doa'],
+    unlockedHorns: ['classic_cng'],
     equippedColor: 'chittagong_green',
     equippedSticker: 'mayer_doa',
+    equippedHorn: 'classic_cng',
     upgrades: { ...DEFAULT_UPGRADES },
     missionDate: today,
     missions: generateDailyMissions(today),
@@ -160,8 +179,17 @@ export function loadSaveData(): PlayerSaveData {
       unlockedStickers: Array.isArray(parsed.unlockedStickers)
         ? Array.from(new Set(['mayer_doa', ...parsed.unlockedStickers]))
         : defaults.unlockedStickers,
+      unlockedHorns: Array.isArray(parsed.unlockedHorns)
+        ? Array.from(
+            new Set<HornSoundId>([
+              'classic_cng',
+              ...parsed.unlockedHorns.filter((id): id is HornSoundId => isValidHornId(id)),
+            ])
+          )
+        : defaults.unlockedHorns,
       equippedColor: typeof parsed.equippedColor === 'string' ? parsed.equippedColor : defaults.equippedColor,
       equippedSticker: typeof parsed.equippedSticker === 'string' ? parsed.equippedSticker : defaults.equippedSticker,
+      equippedHorn: isValidHornId(parsed.equippedHorn) ? parsed.equippedHorn : defaults.equippedHorn,
       upgrades,
       missionDate: today,
       missions,
@@ -173,7 +201,9 @@ export function loadSaveData(): PlayerSaveData {
       parsed.lastLoginDate !== today ||
       typeof parsed.loginStreak !== 'number' ||
       !parsed.upgrades ||
-      typeof parsed.driverXp !== 'number'
+      typeof parsed.driverXp !== 'number' ||
+      !Array.isArray(parsed.unlockedHorns) ||
+      !isValidHornId(parsed.equippedHorn)
     ) {
       savePlayerData(merged);
     }

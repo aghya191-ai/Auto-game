@@ -1,3 +1,5 @@
+import type { HornSoundId } from '../types/game';
+
 export class SoundEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
@@ -24,6 +26,7 @@ export class SoundEngine {
   private musicTimer: number | null = null;
   private musicStep = 0;
   private hornVariant = 0;
+  private hornStyle: HornSoundId = 'classic_cng';
   private isPlayingPhase = false;
   private radioDuckUntil = 0;
 
@@ -360,12 +363,127 @@ export class SoundEngine {
     }
   }
 
-  public playHorn(): void {
+  public setHornStyle(style: HornSoundId): void {
+    this.hornStyle = style;
+  }
+
+  public getHornStyle(): HornSoundId {
+    return this.hornStyle;
+  }
+
+  public previewHorn(style?: HornSoundId): void {
+    this.playHorn(style);
+  }
+
+  public playHorn(overrideStyle?: HornSoundId): void {
     const ctx = this.ensureContext();
     const out = this.getOutNode();
     if (!ctx || !out) return;
     const now = ctx.currentTime;
+    const style = overrideStyle ?? this.hornStyle;
 
+    if (style === 'truck_air_horn') {
+      // Deep booming Bangladeshi highway truck dual-chord air horn ("ভোঁ-ভোঁওও!")
+      const triggerAirChord = (offset: number, dur: number, pitchScale: number, peakVol: number) => {
+        const freqs = [116 * pitchScale, 146 * pitchScale, 174 * pitchScale];
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(1050, now + offset);
+        filter.frequency.exponentialRampToValueAtTime(620, now + offset + dur);
+        filter.Q.value = 1.4;
+
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.001, now + offset);
+        gain.gain.exponentialRampToValueAtTime(peakVol, now + offset + 0.025);
+        gain.gain.setValueAtTime(peakVol * 0.92, now + offset + Math.max(0.04, dur - 0.08));
+        gain.gain.exponentialRampToValueAtTime(0.001, now + offset + dur);
+
+        filter.connect(gain);
+        gain.connect(out);
+
+        for (let i = 0; i < freqs.length; i++) {
+          const osc = ctx.createOscillator();
+          osc.type = i === 0 ? 'sawtooth' : 'square';
+          osc.frequency.setValueAtTime(freqs[i], now + offset);
+          osc.frequency.linearRampToValueAtTime(freqs[i] * 0.96, now + offset + dur);
+          osc.connect(filter);
+          osc.start(now + offset);
+          osc.stop(now + offset + dur + 0.02);
+        }
+      };
+
+      triggerAirChord(0, 0.11, 1.0, 0.09);
+      triggerAirChord(0.14, 0.38, 0.98 + Math.random() * 0.04, 0.11);
+      return;
+    }
+
+    if (style === 'bicycle_bell') {
+      // Bright metallic shimmering "ক্রিং-ক্রিং!" bicycle/rickshaw bell
+      const triggerRing = (offset: number, dur: number, vol: number) => {
+        const partials = [1980, 3140, 4690];
+        const jitter = 0.98 + Math.random() * 0.04;
+        for (let i = 0; i < partials.length; i++) {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = i === 0 ? 'sine' : 'triangle';
+          osc.frequency.setValueAtTime(partials[i] * jitter, now + offset);
+          const pVol = vol / (i * 1.4 + 1);
+          gain.gain.setValueAtTime(0.001, now + offset);
+          gain.gain.exponentialRampToValueAtTime(pVol, now + offset + 0.004);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + offset + dur);
+          osc.connect(gain);
+          gain.connect(out);
+          osc.start(now + offset);
+          osc.stop(now + offset + dur + 0.01);
+        }
+      };
+
+      triggerRing(0, 0.14, 0.12);
+      triggerRing(0.06, 0.14, 0.11);
+      triggerRing(0.13, 0.16, 0.12);
+      triggerRing(0.21, 0.22, 0.13);
+      return;
+    }
+
+    if (style === 'melody_bus') {
+      // Playful 5-note Bangladeshi local bus musical horn riff
+      const notes = [523.25, 659.25, 783.99, 659.25, 1046.5];
+      const step = 0.078;
+      notes.forEach((freq, idx) => {
+        const offset = idx * step;
+        const dur = idx === notes.length - 1 ? 0.16 : 0.068;
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const filter = ctx.createBiquadFilter();
+        const gain = ctx.createGain();
+
+        osc1.type = 'sawtooth';
+        osc2.type = 'triangle';
+        osc1.frequency.setValueAtTime(freq, now + offset);
+        osc2.frequency.setValueAtTime(freq * 1.5, now + offset);
+
+        filter.type = 'bandpass';
+        filter.frequency.value = 1250;
+        filter.Q.value = 1.1;
+
+        gain.gain.setValueAtTime(0.001, now + offset);
+        gain.gain.exponentialRampToValueAtTime(0.11, now + offset + 0.012);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + offset + dur);
+
+        osc1.connect(filter);
+        osc2.connect(filter);
+        filter.connect(gain);
+        gain.connect(out);
+
+        osc1.start(now + offset);
+        osc2.start(now + offset);
+        osc1.stop(now + offset + dur + 0.015);
+        osc2.stop(now + offset + dur + 0.015);
+      });
+      return;
+    }
+
+    // Default: Classic CNG 4-variant dual-oscillator honk
     const variant = this.hornVariant;
     this.hornVariant = (this.hornVariant + 1) % 4;
     const jitter = 0.97 + Math.random() * 0.06;

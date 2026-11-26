@@ -16,6 +16,7 @@ import type {
   GameOverSummary,
   GamePhase,
   GraphicsQuality,
+  HornSoundId,
   HudSnapshot,
   InputState,
   MissionMetric,
@@ -427,11 +428,13 @@ export class GameEngine {
     initialColorId: string,
     initialStickerId: string,
     initialHighScore: number,
-    initialUpgrades?: CngUpgradesState
+    initialUpgrades?: CngUpgradesState,
+    initialHornId?: HornSoundId
   ) {
     this.container = container;
     this.callbacks = callbacks;
     this.sound = new SoundEngine();
+    this.sound.setHornStyle(initialHornId ?? 'classic_cng');
     this.highScoreRef = initialHighScore;
     if (initialUpgrades) {
       this.equippedUpgrades = { ...this.equippedUpgrades, ...initialUpgrades };
@@ -1172,6 +1175,10 @@ export class GameEngine {
 
   public updateUpgrades(upgrades: CngUpgradesState): void {
     this.equippedUpgrades = { ...this.equippedUpgrades, ...upgrades };
+  }
+
+  public updateHorn(hornId: HornSoundId): void {
+    this.sound.setHornStyle(hornId);
   }
 
   private syncCameraVisibility(): void {
