@@ -1,7 +1,19 @@
 import { DAILY_STREAK_REWARDS, MISSION_TEMPLATES } from '../config/chattogramData';
-import type { DailyMission, MissionMetric, PlayerSaveData } from '../types/game';
+import type { CngUpgradesState, DailyMission, MissionMetric, PlayerSaveData } from '../types/game';
 
 const STORAGE_KEY = 'chattogram_express_save_v1';
+
+const DEFAULT_UPGRADES: CngUpgradesState = {
+  engine: 0,
+  tank: 0,
+  chassis: 0,
+  handling: 0,
+};
+
+function sanitizeUpgradeLevel(val: unknown): number {
+  if (typeof val !== 'number' || !Number.isFinite(val)) return 0;
+  return Math.max(0, Math.min(3, Math.floor(val)));
+}
 
 function formatLocalDateKey(date: Date): string {
   const y = date.getFullYear();
@@ -68,6 +80,7 @@ export function loadSaveData(): PlayerSaveData {
   const defaults: PlayerSaveData = {
     taka: 200,
     highScore: 0,
+    driverXp: 0,
     completedMissionsTotal: 0,
     loginStreak: 1,
     lastLoginDate: today,
@@ -76,6 +89,7 @@ export function loadSaveData(): PlayerSaveData {
     unlockedStickers: ['mayer_doa'],
     equippedColor: 'chittagong_green',
     equippedSticker: 'mayer_doa',
+    upgrades: { ...DEFAULT_UPGRADES },
     missionDate: today,
     missions: generateDailyMissions(today),
   };
@@ -114,12 +128,24 @@ export function loadSaveData(): PlayerSaveData {
     const lastStreakClaimDate =
       typeof parsed.lastStreakClaimDate === 'string' ? parsed.lastStreakClaimDate : '';
 
+    const rawUpgrades = (parsed.upgrades ?? {}) as Partial<CngUpgradesState>;
+    const upgrades: CngUpgradesState = {
+      engine: sanitizeUpgradeLevel(rawUpgrades.engine),
+      tank: sanitizeUpgradeLevel(rawUpgrades.tank),
+      chassis: sanitizeUpgradeLevel(rawUpgrades.chassis),
+      handling: sanitizeUpgradeLevel(rawUpgrades.handling),
+    };
+
     const merged: PlayerSaveData = {
       taka: typeof parsed.taka === 'number' && Number.isFinite(parsed.taka) ? Math.max(0, parsed.taka) : defaults.taka,
       highScore:
         typeof parsed.highScore === 'number' && Number.isFinite(parsed.highScore)
           ? Math.max(0, parsed.highScore)
           : defaults.highScore,
+      driverXp:
+        typeof parsed.driverXp === 'number' && Number.isFinite(parsed.driverXp)
+          ? Math.max(0, Math.round(parsed.driverXp))
+          : 0,
       completedMissionsTotal:
         typeof parsed.completedMissionsTotal === 'number' &&
         Number.isFinite(parsed.completedMissionsTotal)
@@ -136,6 +162,7 @@ export function loadSaveData(): PlayerSaveData {
         : defaults.unlockedStickers,
       equippedColor: typeof parsed.equippedColor === 'string' ? parsed.equippedColor : defaults.equippedColor,
       equippedSticker: typeof parsed.equippedSticker === 'string' ? parsed.equippedSticker : defaults.equippedSticker,
+      upgrades,
       missionDate: today,
       missions,
     };
@@ -144,7 +171,9 @@ export function loadSaveData(): PlayerSaveData {
       parsed.missionDate !== today ||
       typeof parsed.completedMissionsTotal !== 'number' ||
       parsed.lastLoginDate !== today ||
-      typeof parsed.loginStreak !== 'number'
+      typeof parsed.loginStreak !== 'number' ||
+      !parsed.upgrades ||
+      typeof parsed.driverXp !== 'number'
     ) {
       savePlayerData(merged);
     }

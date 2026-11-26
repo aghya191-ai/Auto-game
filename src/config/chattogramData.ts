@@ -2,10 +2,13 @@ import type {
   AreaConfig,
   CngColorOption,
   CngStickerOption,
+  CngUpgradeConfig,
   DeathReason,
   DriverRankTier,
   MissionMetric,
   RadioClipKind,
+  RandomEventConfig,
+  RandomEventKind,
   WeatherCondition,
 } from '../types/game';
 
@@ -429,6 +432,76 @@ export const CNG_STICKERS: CngStickerOption[] = [
   },
 ];
 
+export const CNG_UPGRADES: CngUpgradeConfig[] = [
+  {
+    id: 'engine',
+    name: 'টার্বো ইঞ্জিন টিউন',
+    description: 'সর্বোচ্চ গতি ও পিকআপ বাড়ে',
+    effectPerLevel: '+৮% গতি/ধাপ',
+    prices: [350, 720, 1250],
+    badgeBgClass: 'bg-orange-400',
+  },
+  {
+    id: 'tank',
+    name: 'বড় গ্যাস সিলিন্ডার',
+    description: 'গ্যাস খরচ কমে ও দ্রুত রিফিল হয়',
+    effectPerLevel: '-১০% খরচ/ধাপ',
+    prices: [300, 620, 1080],
+    badgeBgClass: 'bg-yellow-300',
+  },
+  {
+    id: 'chassis',
+    name: 'মজবুত লোহার খাঁচা',
+    description: 'ধাক্কায় গাড়ির HP ক্ষতি কমে',
+    effectPerLevel: '-১৮% ক্ষতি/ধাপ',
+    prices: [320, 680, 1150],
+    badgeBgClass: 'bg-emerald-400',
+  },
+  {
+    id: 'handling',
+    name: 'হাইড্রোলিক ব্রেক-স্টিয়ারিং',
+    description: 'দ্রুত ব্রেক ও ভেজা রাস্তায় নিয়ন্ত্রণ',
+    effectPerLevel: '+১২% গ্রিপ/ধাপ',
+    prices: [280, 580, 990],
+    badgeBgClass: 'bg-sky-400',
+  },
+];
+
+export const RANDOM_EVENTS: Record<RandomEventKind, RandomEventConfig> = {
+  road_digging: {
+    kind: 'road_digging',
+    title: 'রাস্তা খোঁড়াখুঁড়ি (ওয়াসা)',
+    shortLabel: 'রাস্তা খোঁড়া',
+    emoji: '🚧',
+    alertText: '🚧 সামনে ওয়াসার রাস্তা খোঁড়া! ব্যারিকেড বাঁচিয়ে চলুন',
+    pillBgClass: 'bg-amber-400/90 text-stone-950',
+  },
+  strike_procession: {
+    kind: 'strike_procession',
+    title: 'হরতাল মিছিল',
+    shortLabel: 'হরতাল মিছিল',
+    emoji: '📢',
+    alertText: '📢 সামনে হরতাল মিছিল! প্ল্যাকার্ড ও ভিড় পাশ কাটিয়ে যান',
+    pillBgClass: 'bg-rose-500/90 text-yellow-200',
+  },
+  flooding: {
+    kind: 'flooding',
+    title: 'চট্টগ্রাম জলাবদ্ধতা',
+    shortLabel: 'জলাবদ্ধতা',
+    emoji: '🌊',
+    alertText: '🌊 রাস্তায় হাঁটুসমান জল! ভেজা ব্রেক ও স্লিপ সামলে চলুন',
+    pillBgClass: 'bg-cyan-400/90 text-stone-950',
+  },
+  vip_convoy: {
+    kind: 'vip_convoy',
+    title: 'ভিআইপি কনভয়',
+    shortLabel: 'ভিআইপি কনভয়',
+    emoji: '🚨',
+    alertText: '🚨 ভিআইপি কনভয় আসছে! লেন ছেড়ে দিলে বোনাস',
+    pillBgClass: 'bg-indigo-600/90 text-yellow-200',
+  },
+};
+
 export interface MissionTemplate {
   id: string;
   title: string;
@@ -449,6 +522,7 @@ export const MISSION_TEMPLATES: MissionTemplate[] = [
   { id: 'm_near_5', title: '৫ বার গাড়ির গা ঘেঁষে বেরিয়ে যাও', metric: 'near_misses', target: 5, reward: 300 },
   { id: 'm_pass_2', title: '২ জন যাত্রীকে গন্তব্যে নামিয়ে দাও', metric: 'passengers', target: 2, reward: 320 },
   { id: 'm_sig_2', title: 'লাল বাতিতে ২ বার নিয়ম মেনে থামো', metric: 'signal_stops', target: 2, reward: 260 },
+  { id: 'm_evt_2', title: '২টি রাস্তার ঘটনা নিরাপদে পার হও', metric: 'events_survived', target: 2, reward: 340 },
 ];
 
 export const SATIRE_HEADLINES: Record<

@@ -3,11 +3,13 @@ import type { DriverProgression } from '../types/game';
 
 export function getDriverProgression(
   bestScore: number,
-  completedMissions: number
+  completedMissions: number,
+  driverXp = 0
 ): DriverProgression {
   const safeScore = Math.max(0, Math.round(bestScore));
   const safeMissions = Math.max(0, Math.floor(completedMissions));
-  const points = safeScore + safeMissions * MISSION_RANK_POINTS;
+  const safeXp = Math.max(0, Math.round(driverXp));
+  const points = safeScore + safeMissions * MISSION_RANK_POINTS + safeXp;
 
   let currentIdx = 0;
   for (let i = 0; i < DRIVER_RANKS.length; i++) {

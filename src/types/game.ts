@@ -63,7 +63,36 @@ export type MissionMetric =
   | 'near_misses'
   | 'boost_time'
   | 'passengers'
-  | 'signal_stops';
+  | 'signal_stops'
+  | 'events_survived';
+
+export type CngUpgradeId = 'engine' | 'tank' | 'chassis' | 'handling';
+
+export type CngUpgradesState = Record<CngUpgradeId, number>;
+
+export interface CngUpgradeConfig {
+  id: CngUpgradeId;
+  name: string;
+  description: string;
+  effectPerLevel: string;
+  prices: [number, number, number];
+  badgeBgClass: string;
+}
+
+export type RandomEventKind =
+  | 'road_digging'
+  | 'strike_procession'
+  | 'flooding'
+  | 'vip_convoy';
+
+export interface RandomEventConfig {
+  kind: RandomEventKind;
+  title: string;
+  shortLabel: string;
+  emoji: string;
+  alertText: string;
+  pillBgClass: string;
+}
 
 export interface DailyMission {
   id: string;
@@ -102,6 +131,7 @@ export interface DriverProgression {
 export interface PlayerSaveData {
   taka: number;
   highScore: number;
+  driverXp: number;
   completedMissionsTotal: number;
   loginStreak: number;
   lastLoginDate: string;
@@ -110,6 +140,7 @@ export interface PlayerSaveData {
   unlockedStickers: string[];
   equippedColor: string;
   equippedSticker: string;
+  upgrades: CngUpgradesState;
   missionDate: string;
   missions: DailyMission[];
 }
@@ -126,6 +157,7 @@ export interface RadarEntity {
     | 'bribe'
     | 'pickup'
     | 'dropoff'
+    | 'hazard'
     | 'light_red'
     | 'light_yellow'
     | 'light_green';
@@ -149,9 +181,11 @@ export interface HudSnapshot {
   inGasZone: boolean;
   inBribeZone: boolean;
   passengerActive: boolean;
+  passengerDestination: string;
   passengerFare: number;
   passengerDistLeft: number;
   passengerNearPickup: boolean;
+  activeEvent: { kind: RandomEventKind; label: string; emoji: string; timeLeft: number } | null;
   cameraMode: CameraMode;
   steerDir: -1 | 0 | 1;
   wrongWay: boolean;

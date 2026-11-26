@@ -26,7 +26,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { useState } from 'react';
-import { NEWS_TICKER_LINES } from '../config/chattogramData';
+import { NEWS_TICKER_LINES, RANDOM_EVENTS } from '../config/chattogramData';
 import type {
   DriverProgression,
   FloatingMoneyPopup,
@@ -210,7 +210,10 @@ export function HUD({
               ) : hud.passengerActive ? (
                 <div className="sticker-chip flex items-center gap-1 rounded-lg bg-emerald-400/95 px-2 py-0.5 text-[10px] font-black text-stone-950 tabular-nums">
                   <UserCheck className="h-3 w-3 shrink-0" />
-                  <span>যাত্রী {toBn(hud.passengerDistLeft)} মি</span>
+                  <span>
+                    যাত্রী{hud.passengerDestination ? ` → ${hud.passengerDestination}` : ''} ·{' '}
+                    {toBn(hud.passengerDistLeft)} মি
+                  </span>
                 </div>
               ) : hud.passengerNearPickup ? (
                 <div className="sticker-chip rounded-lg bg-cyan-300/95 px-2 py-0.5 text-[10px] font-black text-stone-950">
@@ -317,7 +320,8 @@ export function HUD({
                   <div className="sticker-chip flex items-center gap-1 rounded-lg bg-emerald-400 px-2 py-0.5 text-[10px] font-black text-stone-950 tabular-nums">
                     <UserCheck className="h-3 w-3 shrink-0" />
                     <span>
-                      যাত্রী {toBn(hud.passengerDistLeft)} মি (৳{toBn(hud.passengerFare)})
+                      যাত্রী{hud.passengerDestination ? ` → ${hud.passengerDestination}` : ''} ·{' '}
+                      {toBn(hud.passengerDistLeft)} মি (৳{toBn(hud.passengerFare)})
                     </span>
                   </div>
                 ) : hud.passengerNearPickup ? (
@@ -598,6 +602,17 @@ export function HUD({
                     />
                   );
                 }
+                if (ent.kind === 'hazard') {
+                  return (
+                    <polygon
+                      key={idx}
+                      points={`${px},${py - 4.5} ${px + 4.5},${py} ${px},${py + 4.5} ${px - 4.5},${py}`}
+                      fill="#f97316"
+                      stroke="#fef08a"
+                      strokeWidth="1"
+                    />
+                  );
+                }
                 const w = ent.kind === 'bus' || ent.kind === 'truck' ? 4.4 : 3.2;
                 const h = ent.kind === 'bus' || ent.kind === 'truck' ? 7 : 4.6;
                 const fill =
@@ -668,18 +683,16 @@ export function HUD({
       )}
 
       {/* TOP-CENTER Single Small Pill Slot (max ~44px tall, semi-transparent, auto-hides) */}
-      {!cleanMode && topPillMode && (
+      {!cleanMode && (topPillMode || hud.activeEvent) && (
         <div className="pointer-events-none fixed left-1/2 top-14 z-20 flex w-[84vw] max-w-sm -translate-x-1/2 justify-center sm:top-3">
-          {topPillMode === 'toast' && activeToast && (
+          {topPillMode === 'toast' && activeToast ? (
             <div
               key={activeToast.id}
               className={`animate-toast-pop flex max-h-[44px] max-w-full items-center gap-1.5 truncate rounded-full border-2 border-stone-950 px-3.5 py-1 text-center text-xs font-black shadow-[2px_2px_0_#1c1917] ${toastToneCls}`}
             >
               <span className="truncate">{activeToast.text}</span>
             </div>
-          )}
-
-          {topPillMode === 'area' && areaBanner && (
+          ) : topPillMode === 'area' && areaBanner ? (
             <div
               key={`${areaBanner.name}-${areaBanner.loopCount}`}
               className="animate-toast-pop flex max-h-[44px] max-w-full items-center gap-1.5 rounded-full border-2 border-stone-950 bg-[#fef6df]/90 px-3.5 py-1 text-xs font-black text-stone-950 shadow-[2px_2px_0_#1c1917] whitespace-nowrap"
@@ -690,7 +703,20 @@ export function HUD({
                 লুপ #{toBn(areaBanner.loopCount)}
               </span>
             </div>
-          )}
+          ) : hud.activeEvent ? (
+            <div
+              key={hud.activeEvent.kind}
+              className={`flex max-h-[38px] max-w-full items-center gap-1.5 rounded-full border-2 border-stone-950 px-3 py-0.5 text-[11px] font-black shadow-[2px_2px_0_#1c1917] whitespace-nowrap tabular-nums ${
+                RANDOM_EVENTS[hud.activeEvent.kind].pillBgClass
+              }`}
+            >
+              <span>{hud.activeEvent.emoji}</span>
+              <span>{hud.activeEvent.label}</span>
+              <span className="rounded-full border border-stone-950 bg-white/90 px-1.5 py-0 text-[10px] font-black text-stone-950">
+                {toBn(hud.activeEvent.timeLeft)} সে
+              </span>
+            </div>
+          ) : null}
         </div>
       )}
 

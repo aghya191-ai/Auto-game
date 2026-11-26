@@ -1724,3 +1724,159 @@ export function createVehicleModel(kind: VehicleKind, maxAnisotropy: number): Tr
     setTurnSignal,
   };
 }
+
+export function createVipConvoyVehicle(
+  role: 'police' | 'vip',
+  maxAnisotropy: number
+): TrafficModelRig {
+  const pool = getVehicleAssetPool(maxAnisotropy);
+  const geos = getSharedVehicleGeos();
+
+  const group = new THREE.Group();
+  const bodyGroup = new THREE.Group();
+  const detailGroup = new THREE.Group();
+  bodyGroup.add(detailGroup);
+  group.add(bodyGroup);
+
+  const wheels: THREE.Object3D[] = [];
+  const wheelDetails: THREE.Object3D[] = [];
+  const wheelRadius = 0.36;
+
+  const tailMat = new THREE.MeshStandardMaterial({
+    color: '#991b1b',
+    emissive: '#ef4444',
+    emissiveIntensity: 0.85,
+    roughness: 0.22,
+  });
+  const leftIndMat = new THREE.MeshStandardMaterial({
+    color: '#92400e',
+    emissive: '#f59e0b',
+    emissiveIntensity: 0.12,
+    roughness: 0.25,
+  });
+  const rightIndMat = new THREE.MeshStandardMaterial({
+    color: '#92400e',
+    emissive: '#f59e0b',
+    emissiveIntensity: 0.12,
+    roughness: 0.25,
+  });
+
+  const addWheel = (x: number, y: number, z: number) => {
+    const w = new THREE.Group();
+    const tire = new THREE.Mesh(geos.tireCar, pool.tireMat);
+    const hub = new THREE.Mesh(geos.rimCar, pool.alloyRimMat);
+    w.add(tire, hub);
+    w.position.set(x, y, z);
+    group.add(w);
+    wheels.push(w);
+  };
+
+  const redBeaconMat = new THREE.MeshStandardMaterial({
+    color: '#dc2626',
+    emissive: '#ef4444',
+    emissiveIntensity: 2.5,
+    roughness: 0.15,
+  });
+  const blueBeaconMat = new THREE.MeshStandardMaterial({
+    color: '#1d4ed8',
+    emissive: '#38bdf8',
+    emissiveIntensity: 0.4,
+    roughness: 0.15,
+  });
+
+  if (role === 'police') {
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: '#f8fafc',
+      roughness: 0.28,
+      metalness: 0.35,
+    });
+    const stripeMat = new THREE.MeshStandardMaterial({
+      color: '#1d4ed8',
+      roughness: 0.35,
+    });
+    const body = new THREE.Mesh(geos.pickupCab, bodyMat);
+    body.castShadow = true;
+    const rearDeck = new THREE.Mesh(new THREE.BoxGeometry(1.88, 0.72, 2.02), bodyMat);
+    rearDeck.position.set(0, 0.78, 1.05);
+    const stripeL = new THREE.Mesh(new THREE.BoxGeometry(1.94, 0.22, 3.85), stripeMat);
+    stripeL.position.set(0, 0.74, 0.04);
+    const ws = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.52, 0.08), pool.tintedGlassMat);
+    ws.position.set(0, 1.44, -1.2);
+    ws.rotation.x = -0.52;
+
+    const barBase = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.09, 0.26), pool.bumperDarkMat);
+    barBase.position.set(0, 1.82, -0.55);
+    const redBeacon = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.14, 0.22), redBeaconMat);
+    redBeacon.position.set(-0.34, 1.92, -0.55);
+    const blueBeacon = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.14, 0.22), blueBeaconMat);
+    blueBeacon.position.set(0.34, 1.92, -0.55);
+
+    bodyGroup.add(body, rearDeck, stripeL, ws, barBase, redBeacon, blueBeacon);
+  } else {
+    const vipMat = new THREE.MeshStandardMaterial({
+      color: '#09090b',
+      roughness: 0.18,
+      metalness: 0.78,
+    });
+    const body = new THREE.Mesh(geos.microbusBody, vipMat);
+    body.scale.set(1.06, 0.94, 1.04);
+    body.castShadow = true;
+    const glass = new THREE.Mesh(geos.microbusGlass, pool.tintedGlassMat);
+    glass.scale.set(1.06, 0.94, 1.04);
+    const grille = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.34, 0.08), pool.chromeMat);
+    grille.position.set(0, 0.66, -2.18);
+
+    // Small VIP flag staff on front fender + dual grille strobes
+    const flagStaff = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.55, 6), pool.chromeMat);
+    flagStaff.position.set(-0.88, 1.18, -1.85);
+    const flagCloth = new THREE.Mesh(
+      new THREE.BoxGeometry(0.04, 0.22, 0.34),
+      new THREE.MeshStandardMaterial({ color: '#16a34a', roughness: 0.6 })
+    );
+    flagCloth.position.set(-0.88, 1.34, -1.68);
+
+    const redBeacon = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.12, 0.1), redBeaconMat);
+    redBeacon.position.set(-0.42, 0.72, -2.22);
+    const blueBeacon = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.12, 0.1), blueBeaconMat);
+    blueBeacon.position.set(0.42, 0.72, -2.22);
+
+    bodyGroup.add(body, glass, grille, flagStaff, flagCloth, redBeacon, blueBeacon);
+  }
+
+  [-1, 1].forEach((s) => {
+    const tl = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.06), tailMat);
+    tl.position.set(s * 0.74, 0.84, 2.14);
+    const hl = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.06), pool.headlightLensMat);
+    hl.position.set(s * 0.74, 0.8, -2.14);
+    bodyGroup.add(tl, hl);
+  });
+
+  addWheel(-0.92, 0.36, -1.32);
+  addWheel(0.92, 0.36, -1.32);
+  addWheel(-0.92, 0.36, 1.32);
+  addWheel(0.92, 0.36, 1.32);
+
+  return {
+    group,
+    bodyGroup,
+    detailGroup,
+    wheelDetails,
+    halfWidth: 1.02,
+    halfLength: 2.15,
+    wheels,
+    wheelRadius,
+    isEmergency: true,
+    setBraking: (braking: boolean) => {
+      tailMat.emissiveIntensity = braking ? 2.8 : 0.85;
+    },
+    setTurnSignal: (dir: -1 | 0 | 1 | 2, blinkOn: boolean) => {
+      leftIndMat.emissiveIntensity = blinkOn && (dir === -1 || dir === 2) ? 2.5 : 0.1;
+      rightIndMat.emissiveIntensity = blinkOn && (dir === 1 || dir === 2) ? 2.5 : 0.1;
+    },
+    setEmergencyPhase: (phase: number) => {
+      const redActive = Math.sin(phase) > 0;
+      redBeaconMat.emissiveIntensity = redActive ? 3.5 : 0.25;
+      blueBeaconMat.emissiveIntensity = redActive ? 0.25 : 3.5;
+    },
+  };
+}

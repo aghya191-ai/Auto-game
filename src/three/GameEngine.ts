@@ -4,11 +4,13 @@ import {
   AREAS,
   CNG_COLORS,
   CNG_STICKERS,
+  RANDOM_EVENTS,
   SATIRE_HEADLINES,
 } from '../config/chattogramData';
 import type {
   AtmosphereMode,
   CameraMode,
+  CngUpgradesState,
   DeathReason,
   GameEventToast,
   GameOverSummary,
@@ -18,6 +20,7 @@ import type {
   InputState,
   MissionMetric,
   RadarEntity,
+  RandomEventKind,
   TrafficLightState,
   VehicleKind,
   WeatherCondition,
@@ -30,11 +33,14 @@ import {
   createFlyoverPillar,
   createOverheadRoadSign,
   createPedestrianModel,
+  createProtestPlacard,
   createRoadDivider,
+  createRoadDiggingBarrier,
   createStreetLight,
   createTeaStallBench,
   createTrafficLightModel,
   createVehicleModel,
+  createVipConvoyVehicle,
   createZonePad,
   disposePedestrianAssetPool,
   pickRandomPedestrianStyle,
@@ -43,6 +49,7 @@ import {
   type PedestrianPose,
   type PedestrianRig,
   type PedestrianStyle,
+  type RoadDiggingRig,
   type SpeechCategory,
   type TrafficLightRig,
   type TrafficModelRig,
@@ -147,6 +154,7 @@ interface TrafficEntity {
   suddenStopTimer: number;
   suddenStopCooldown: number;
   turnSignalDir: -1 | 0 | 1 | 2;
+  isVipConvoy?: boolean;
 }
 
 interface PedestrianEntity {
@@ -159,6 +167,7 @@ interface PedestrianEntity {
   walkSpeed: number;
   basePose: PedestrianPose;
   isChasing: boolean;
+  isProtestor?: boolean;
   canCollide: boolean;
   hitCooldown: number;
   animPhase: number;
@@ -180,10 +189,18 @@ interface ZoneEntity {
 interface WaitingPassengerEntity {
   rig: PedestrianRig;
   pad: THREE.Group;
+  destination: string;
   x: number;
   z: number;
   wavePhase: number;
   pickedUp: boolean;
+}
+
+interface DiggingBarrierEntity {
+  rig: RoadDiggingRig;
+  x: number;
+  z: number;
+  hit: boolean;
 }
 
 interface GantryEntity {
@@ -207,6 +224,7 @@ export interface EngineCallbacks {
   onAreaEnter: (areaName: string, tagline: string, loopCount: number) => void;
   onToast: (toast: Omit<GameEventToast, 'id'>) => void;
   onMissionProgress: (metric: MissionMetric, delta: number) => void;
+  onDriverXpGain?: (xp: number) => void;
   onGameOver: (summary: GameOverSummary) => void;
   onCrashJuice?: (intensity: 'minor' | 'major') => void;
 }
@@ -269,8 +287,11 @@ export class GameEngine {
   private pedestrians: PedestrianEntity[] = [];
   private zones: ZoneEntity[] = [];
   private waitingPassengers: WaitingPassengerEntity[] = [];
+  private diggingBarriers: DiggingBarrierEntity[] = [];
   private gantries: GantryEntity[] = [];
   private trafficLights: TrafficLightEntity[] = [];
+  private floodWaterMesh!: THREE.Mesh;
+  private floodWaterMat!: THREE.MeshStandardMaterial;
 
   private phase: GamePhase = 'menu';
   private cameraMode: CameraMode = 'external';
@@ -318,10 +339,25 @@ export class GameEngine {
 
   // Passenger state
   private passengerActive = false;
+  private passengerDestination = '';
   private passengerFare = 0;
   private passengerDistLeft = 0;
   private passengerDropoffSpawned = false;
   private distanceSincePassenger = 0;
+
+  // Random events state (20-30s each)
+  private activeEventKind: RandomEventKind | null = null;
+  private activeEventTimer = 0;
+  private nextEventCooldown = 20;
+  private lastEventKind: RandomEventKind | null = null;
+  private diggingSpawnAccum = 0;
+  private processionSpawnAccum = 0;
+  private processionLaneX = 2.8;
+  private vipSpawned = false;
+  private vipYieldAwarded = false;
+  private vipLaneX = 2.8;
+  private vipSirenCooldown = 0;
+  private floodSplashAccum = 0;
 
   // Timers & cooldowns
   private invulnTimer = 0;
@@ -359,18 +395,28 @@ export class GameEngine {
 
   private equippedColorHex = CNG_COLORS[0].hex;
   private equippedSticker = CNG_STICKERS[0];
+  private equippedUpgrades: CngUpgradesState = {
+    engine: 0,
+    tank: 0,
+    chassis: 0,
+    handling: 0,
+  };
 
   constructor(
     container: HTMLElement,
     callbacks: EngineCallbacks,
     initialColorId: string,
     initialStickerId: string,
-    initialHighScore: number
+    initialHighScore: number,
+    initialUpgrades?: CngUpgradesState
   ) {
     this.container = container;
     this.callbacks = callbacks;
     this.sound = new SoundEngine();
     this.highScoreRef = initialHighScore;
+    if (initialUpgrades) {
+      this.equippedUpgrades = { ...this.equippedUpgrades, ...initialUpgrades };
+    }
 
     this.equippedColorHex =
       CNG_COLORS.find((c) => c.id === initialColorId)?.hex ?? CNG_COLORS[0].hex;
@@ -836,6 +882,22 @@ export class GameEngine {
     if (this.debrisMesh.instanceColor) this.debrisMesh.instanceColor.needsUpdate = true;
     this.scene.add(this.debrisMesh);
 
+    // Chattogram Flooding Water Sheet (visible only during 'flooding' random event)
+    this.floodWaterMat = new THREE.MeshStandardMaterial({
+      color: '#1e3a5f',
+      roughness: 0.14,
+      metalness: 0.42,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      envMapIntensity: 1.8,
+    });
+    this.floodWaterMesh = new THREE.Mesh(new THREE.PlaneGeometry(17.4, 220), this.floodWaterMat);
+    this.floodWaterMesh.rotation.x = -Math.PI / 2;
+    this.floodWaterMesh.position.set(0, 0.024, -65);
+    this.floodWaterMesh.visible = false;
+    this.scene.add(this.floodWaterMesh);
+
     if (!this.isSoftwareGl) {
       this.renderer.compile(this.scene, this.camera);
     }
@@ -1052,6 +1114,10 @@ export class GameEngine {
     this.cockpitRig.updateAppearance(this.equippedColorHex);
   }
 
+  public updateUpgrades(upgrades: CngUpgradesState): void {
+    this.equippedUpgrades = { ...this.equippedUpgrades, ...upgrades };
+  }
+
   private syncCameraVisibility(): void {
     const driverActive =
       this.cameraMode === 'driver' && (this.phase === 'playing' || this.phase === 'paused');
@@ -1235,10 +1301,21 @@ export class GameEngine {
     this.loopCount = 1;
 
     this.passengerActive = false;
+    this.passengerDestination = '';
     this.passengerFare = 0;
     this.passengerDistLeft = 0;
     this.passengerDropoffSpawned = false;
     this.distanceSincePassenger = 35;
+
+    this.activeEventKind = null;
+    this.activeEventTimer = 0;
+    this.nextEventCooldown = 16 + Math.random() * 6;
+    this.diggingSpawnAccum = 0;
+    this.processionSpawnAccum = 0;
+    this.vipSpawned = false;
+    this.vipYieldAwarded = false;
+    this.vipSirenCooldown = 0;
+    this.floodSplashAccum = 0;
 
     this.invulnTimer = 0;
     this.dividerCooldown = 0;
@@ -1300,10 +1377,22 @@ export class GameEngine {
       this.scene.remove(wp.pad);
     }
     this.waitingPassengers = [];
+    for (const b of this.diggingBarriers) {
+      this.scene.remove(b.rig.group);
+    }
+    this.diggingBarriers = [];
     for (const g of this.gantries) this.scene.remove(g.group);
     this.gantries = [];
     for (const tl of this.trafficLights) this.scene.remove(tl.rig.group);
     this.trafficLights = [];
+    this.activeEventKind = null;
+    this.activeEventTimer = 0;
+    this.vipSpawned = false;
+    this.vipYieldAwarded = false;
+    if (this.floodWaterMesh) {
+      this.floodWaterMesh.visible = false;
+      this.floodWaterMat.opacity = 0;
+    }
     this.resetExhaustPuffs();
     this.resetDustPuffs();
     this.resetDebrisParticles();
@@ -1824,6 +1913,9 @@ export class GameEngine {
     const x = side * 7.6;
     const z = -142;
 
+    const destStep = 1 + Math.floor(Math.random() * 3);
+    const destination = AREAS[(this.areaIndex + destStep) % AREAS.length].name;
+
     const passengerStyles: PedestrianStyle[] = ['office_wear', 'saree', 'panjabi', 'lungi_shirt', 'burqa', 'school_uniform'];
     const rig = createPedestrianModel({
       style: passengerStyles[Math.floor(Math.random() * passengerStyles.length)],
@@ -1834,7 +1926,7 @@ export class GameEngine {
     rig.group.position.set(side * 9.3, 0.20, z);
     rig.group.rotation.y = side === 1 ? -Math.PI / 2 : Math.PI / 2;
 
-    const pad = createZonePad('pickup', this.maxAnisotropy);
+    const pad = createZonePad('pickup', this.maxAnisotropy, destination);
     pad.position.set(x, 0, z);
 
     this.scene.add(rig.group);
@@ -1843,6 +1935,7 @@ export class GameEngine {
     this.waitingPassengers.push({
       rig,
       pad,
+      destination,
       x,
       z,
       wavePhase: 0,
@@ -1852,13 +1945,164 @@ export class GameEngine {
 
   private spawnZone(type: 'gas' | 'bribe' | 'dropoff'): void {
     const laneX = type === 'dropoff' ? (Math.random() < 0.5 ? 6.2 : -6.2) : Math.random() < 0.5 ? 4.4 : -4.4;
-    const pad = createZonePad(type, this.maxAnisotropy);
+    const padLabel = type === 'dropoff' ? this.passengerDestination || undefined : undefined;
+    const pad = createZonePad(type, this.maxAnisotropy, padLabel);
     if (laneX < 0 && pad.children[1] && type !== 'dropoff') {
       pad.children[1].position.x = -4.6;
     }
     pad.position.set(laneX, 0, -145);
     this.scene.add(pad);
     this.zones.push({ group: pad, type, x: laneX, z: -145, triggered: false });
+  }
+
+  private startRandomEvent(): void {
+    const allKinds: RandomEventKind[] = ['road_digging', 'strike_procession', 'flooding', 'vip_convoy'];
+    const pool = allKinds.filter((k) => k !== this.lastEventKind);
+    const kind = pool[Math.floor(Math.random() * pool.length)] ?? 'road_digging';
+    this.lastEventKind = kind;
+    this.activeEventKind = kind;
+    this.activeEventTimer = 20 + Math.random() * 10; // 20–30 seconds each
+    this.diggingSpawnAccum = 28;
+    this.processionSpawnAccum = 14;
+    this.processionLaneX = Math.random() < 0.5 ? 2.8 : 6.0;
+    this.vipSpawned = false;
+    this.vipYieldAwarded = false;
+    this.vipLaneX = Math.abs(this.playerX - 2.8) < 1.8 ? 6.0 : 2.8;
+    this.vipSirenCooldown = 0.4;
+
+    if (kind === 'flooding') {
+      this.floodWaterMesh.visible = true;
+    } else if (kind === 'vip_convoy') {
+      this.spawnVipConvoy();
+    } else if (kind === 'road_digging') {
+      this.spawnDiggingBarriers();
+    } else if (kind === 'strike_procession') {
+      this.spawnProtestWave();
+    }
+
+    const cfg = RANDOM_EVENTS[kind];
+    this.sound.playTrafficHornBurst(kind === 'vip_convoy' ? 'heavy' : 'light', 2);
+    this.callbacks.onToast({
+      text: cfg.alertText,
+      tone: kind === 'flooding' ? 'info' : kind === 'vip_convoy' ? 'pink' : 'warning',
+      priority: 'gas',
+    });
+  }
+
+  private endRandomEvent(survived: boolean): void {
+    if (!this.activeEventKind) return;
+    const endedKind = this.activeEventKind;
+    this.activeEventKind = null;
+    this.activeEventTimer = 0;
+    this.nextEventCooldown = 22 + Math.random() * 12;
+
+    if (survived && this.phase === 'playing') {
+      const cfg = RANDOM_EVENTS[endedKind];
+      this.score += 150;
+      this.callbacks.onMissionProgress('events_survived', 1);
+      this.callbacks.onDriverXpGain?.(140);
+      this.callbacks.onToast({
+        text: `✅ ${cfg.shortLabel} নিরাপদে পার! +১৪০ XP`,
+        tone: 'success',
+        priority: 'level',
+      });
+    }
+  }
+
+  private spawnDiggingBarriers(): void {
+    const forwardLanes = [2.8, 6.0];
+    const pickedLane = forwardLanes[Math.floor(Math.random() * forwardLanes.length)];
+    const lanesToBlock = Math.random() < 0.35 ? [pickedLane, -2.8] : [pickedLane];
+    for (const bx of lanesToBlock) {
+      const rig = createRoadDiggingBarrier(this.maxAnisotropy);
+      const bz = -142 - (bx < 0 ? 12 : 0);
+      rig.group.position.set(bx, 0, bz);
+      this.scene.add(rig.group);
+      this.diggingBarriers.push({ rig, x: bx, z: bz, hit: false });
+    }
+  }
+
+  private spawnProtestWave(): void {
+    const labels = ['দাবি মানতে হবে!', 'হরতাল চলছে!', 'রাস্তা ছাড়ো!', 'চাকা বন্ধ!'];
+    const colors = ['#dc2626', '#b91c1c', '#9f1239', '#ea580c'];
+    const styles: PedestrianStyle[] = ['lungi_shirt', 'panjabi', 'office_wear', 'rickshaw_puller'];
+    const count = 2 + Math.floor(Math.random() * 2);
+
+    for (let i = 0; i < count; i++) {
+      if (this.pedestrians.length >= 44) break;
+      const rig = createPedestrianModel({
+        style: styles[i % styles.length],
+        maxAnisotropy: this.maxAnisotropy,
+      });
+      const placard = createProtestPlacard(
+        labels[(i + Math.floor(Math.random() * labels.length)) % labels.length],
+        colors[i % colors.length],
+        this.maxAnisotropy
+      );
+      rig.group.add(placard);
+
+      const px = THREE.MathUtils.clamp(this.processionLaneX + (i - 0.5) * 1.15, 1.4, 7.2);
+      const pz = -138 - i * 2.1;
+      rig.group.position.set(px, 0, pz);
+      rig.group.rotation.y = Math.PI;
+      this.scene.add(rig.group);
+
+      this.pedestrians.push({
+        rig,
+        x: px,
+        z: pz,
+        baseY: 0,
+        walkDir: 0,
+        walkSpeed: 4.2,
+        basePose: 'wave',
+        isChasing: false,
+        isProtestor: true,
+        canCollide: true,
+        hitCooldown: 0,
+        animPhase: Math.random() * Math.PI * 2,
+        jumpBackTimer: 0,
+        fallTimer: 0,
+        speechTimer: 0,
+        reactYaw: Math.PI,
+        reactTimer: 0,
+      });
+    }
+  }
+
+  private spawnVipConvoy(): void {
+    if (this.vipSpawned) return;
+    this.vipSpawned = true;
+    const roles: ('police' | 'vip')[] = ['police', 'vip', 'police'];
+    const zOffsets = [-150, -162, -174];
+    for (let i = 0; i < roles.length; i++) {
+      const rig = createVipConvoyVehicle(roles[i], this.maxAnisotropy);
+      const z = zOffsets[i];
+      rig.group.position.set(this.vipLaneX, 0, z);
+      rig.group.rotation.y = 0;
+      this.scene.add(rig.group);
+      this.traffic.push({
+        rig,
+        kind: 'car',
+        x: this.vipLaneX,
+        targetX: this.vipLaneX,
+        z,
+        speed: 25,
+        baseSpeed: 25,
+        prevSpeed: 25,
+        direction: 1,
+        nearMissed: false,
+        laneTimer: 99,
+        honked: true,
+        bouncePhase: i * 1.1,
+        driftPhase: 0,
+        driftSpeed: 0,
+        driftAmp: 0,
+        suddenStopTimer: 0,
+        suddenStopCooldown: 99,
+        turnSignalDir: 0,
+        isVipConvoy: true,
+      });
+    }
   }
 
   private triggerCrowdReaction(
@@ -1959,15 +2203,31 @@ export class GameEngine {
       }
     }
 
-    // Nearest blocking heavy vehicle ahead in player's path
+    // Nearest blocking heavy vehicle or road-digging barrier ahead in player's path
     let aheadHazard: { label: string; sub: string; dist: number } | null = null;
     for (const t of this.traffic) {
       if (t.z < -4 && t.z > -65 && Math.abs(t.x - this.playerX) < 2.2) {
         const d = Math.round(Math.abs(t.z));
         if (!aheadHazard || d < aheadHazard.dist) {
           aheadHazard = {
-            label: t.direction === -1 ? 'মুখোমুখি!' : 'অবরোধ',
-            sub: t.kind === 'bus' || t.kind === 'truck' ? 'বড় গাড়ি সামনে!' : 'ওভারটেক করুন!',
+            label: t.isVipConvoy ? 'ভিআইপি!' : t.direction === -1 ? 'মুখোমুখি!' : 'অবরোধ',
+            sub: t.isVipConvoy
+              ? 'সাইড দিন!'
+              : t.kind === 'bus' || t.kind === 'truck'
+              ? 'বড় গাড়ি সামনে!'
+              : 'ওভারটেক করুন!',
+            dist: d,
+          };
+        }
+      }
+    }
+    for (const b of this.diggingBarriers) {
+      if (!b.hit && b.z < -4 && b.z > -65 && Math.abs(b.x - this.playerX) < 2.2) {
+        const d = Math.round(Math.abs(b.z));
+        if (!aheadHazard || d < aheadHazard.dist) {
+          aheadHazard = {
+            label: 'রাস্তা খোঁড়া!',
+            sub: 'লেন বদলান!',
             dist: d,
           };
         }
@@ -1997,7 +2257,9 @@ export class GameEngine {
       if (t.z > 1.4 && t.z < 24 && Math.abs(t.x - this.playerX) < 3.6 && t.z < nearestRearZ) {
         nearestRearZ = t.z;
         rearHazard =
-          t.kind === 'bus'
+          t.isVipConvoy
+            ? 'পেছনে ভিআইপি'
+            : t.kind === 'bus'
             ? 'পেছনে বাস'
             : t.kind === 'truck'
             ? 'পেছনে ট্রাক'
@@ -2023,12 +2285,29 @@ export class GameEngine {
         });
       }
     }
+    for (const b of this.diggingBarriers) {
+      if (b.z > -95 && b.z < 40) {
+        radarEntities.push({
+          dx: b.x - this.playerX,
+          dz: b.z,
+          kind: 'hazard',
+        });
+      }
+    }
     for (const t of this.traffic) {
       if (t.z > -90 && t.z < 40) {
         radarEntities.push({
           dx: t.x - this.playerX,
           dz: t.z,
-          kind: t.kind === 'bus' ? 'bus' : t.kind === 'truck' ? 'truck' : t.kind === 'car' ? 'car' : 'other',
+          kind: t.isVipConvoy
+            ? 'hazard'
+            : t.kind === 'bus'
+            ? 'bus'
+            : t.kind === 'truck'
+            ? 'truck'
+            : t.kind === 'car'
+            ? 'car'
+            : 'other',
         });
       }
     }
@@ -2051,6 +2330,8 @@ export class GameEngine {
       }
     }
 
+    const activeEventCfg = this.activeEventKind ? RANDOM_EVENTS[this.activeEventKind] : null;
+
     this.callbacks.onHudUpdate({
       score: Math.round(this.score),
       runTaka: Math.round(this.runTaka),
@@ -2069,9 +2350,18 @@ export class GameEngine {
       inGasZone: inGas,
       inBribeZone: inBribe,
       passengerActive: this.passengerActive,
+      passengerDestination: this.passengerActive ? this.passengerDestination : '',
       passengerFare: this.passengerFare,
       passengerDistLeft: Math.max(0, Math.round(this.passengerDistLeft)),
       passengerNearPickup: nearPickup,
+      activeEvent: activeEventCfg
+        ? {
+            kind: activeEventCfg.kind,
+            label: activeEventCfg.shortLabel,
+            emoji: activeEventCfg.emoji,
+            timeLeft: Math.max(1, Math.ceil(this.activeEventTimer)),
+          }
+        : null,
       cameraMode: this.cameraMode,
       steerDir: this.steerDir,
       wrongWay: this.playerX < -0.55,
@@ -2304,7 +2594,14 @@ export class GameEngine {
       this.applyWeather(nextWeather, true);
     }
 
-    // Speed & Boost physics (Weather impacts traction, braking distance & top speed)
+    const engineMult = 1 + this.equippedUpgrades.engine * 0.08;
+    const tankDrainMult = Math.max(0.65, 1 - this.equippedUpgrades.tank * 0.1);
+    const tankRefillMult = 1 + this.equippedUpgrades.tank * 0.15;
+    const chassisDmgMult = Math.max(0.4, 1 - this.equippedUpgrades.chassis * 0.18);
+    const handlingMult = 1 + this.equippedUpgrades.handling * 0.12;
+    const isFlooding = this.activeEventKind === 'flooding';
+
+    // Speed & Boost physics (Weather & Flooding impact traction, braking distance & top speed)
     const boosting = this.input.boost && this.gas > 2;
     if (boosting && !this.wasBoosting) {
       this.boostFovKick = 1.0;
@@ -2312,17 +2609,19 @@ export class GameEngine {
     }
     this.wasBoosting = boosting;
 
-    const weatherSpeedMult = this.weather === 'foggy' ? 0.92 : 1.0;
+    const weatherSpeedMult = (this.weather === 'foggy' ? 0.92 : 1.0) * (isFlooding ? 0.89 : 1.0);
     const maxSpeed =
       (boosting ? 50 : 35) *
+      engineMult *
       Math.min(1.35, 1 + (this.loopCount - 1) * 0.08) *
       weatherSpeedMult;
     let targetSpeed = 14 * weatherSpeedMult;
     if (this.input.up || boosting) targetSpeed = maxSpeed;
     else if (this.input.down) targetSpeed = 0;
 
-    const brakeDamp = this.weather === 'rainy' ? 4.3 : this.weather === 'foggy' ? 6.8 : 9.2;
-    const accelDamp = this.weather === 'rainy' ? 2.4 : 3.4;
+    const baseBrakeDamp = this.weather === 'rainy' || isFlooding ? 4.3 : this.weather === 'foggy' ? 6.8 : 9.2;
+    const brakeDamp = baseBrakeDamp * handlingMult;
+    const accelDamp = (this.weather === 'rainy' ? 2.4 : 3.4) * engineMult;
 
     this.prevPlayerSpeed = this.playerSpeed;
     this.playerSpeed = THREE.MathUtils.damp(
@@ -2359,13 +2658,13 @@ export class GameEngine {
     this.steerDir = steerInput as -1 | 0 | 1;
     this.steerSmoothed = THREE.MathUtils.damp(this.steerSmoothed, steerInput, 14, dt);
 
-    const baseSteerSpeed = 12.0 * (0.65 + 0.35 * (this.playerSpeed / 35));
-    const steerMult = this.weather === 'foggy' ? 0.88 : this.weather === 'rainy' ? 1.06 : 1.0;
+    const baseSteerSpeed = 12.0 * handlingMult * (0.65 + 0.35 * (this.playerSpeed / 35));
+    const steerMult = this.weather === 'foggy' ? 0.88 : this.weather === 'rainy' || isFlooding ? 1.06 : 1.0;
     let targetLatVel = steerInput * baseSteerSpeed * steerMult;
-    if (this.weather === 'rainy' && this.playerSpeed > 28) {
-      targetLatVel += Math.sin(this.animTime * 8) * 1.45;
+    if ((this.weather === 'rainy' || isFlooding) && this.playerSpeed > 24) {
+      targetLatVel += Math.sin(this.animTime * (isFlooding ? 9.5 : 8.0)) * ((isFlooding ? 1.75 : 1.45) / handlingMult);
     }
-    const latDamp = this.weather === 'rainy' ? 5.0 : this.weather === 'foggy' ? 12.5 : 18.0;
+    const latDamp = (this.weather === 'rainy' || isFlooding ? 5.0 : this.weather === 'foggy' ? 12.5 : 18.0) * handlingMult;
     this.lateralVel = THREE.MathUtils.damp(this.lateralVel, targetLatVel, latDamp, dt);
 
     const unclampedX = this.playerX + this.lateralVel * dt;
@@ -2490,9 +2789,9 @@ export class GameEngine {
 
     // Gas consumption (gentle idle drain when stopped at red light)
     const gasDrain =
-      this.playerSpeed < 1.0
+      (this.playerSpeed < 1.0
         ? 0.35
-        : (boosting ? 4.6 : 1.95) * (1 + (this.loopCount - 1) * 0.12);
+        : (boosting ? 4.6 : 1.95) * (1 + (this.loopCount - 1) * 0.12)) * tankDrainMult;
     this.gas -= gasDrain * dt;
     if (this.gas <= 0) {
       this.gas = 0;
@@ -2569,12 +2868,13 @@ export class GameEngine {
       if (!wp.pickedUp && nearSide && this.playerSpeed < 17) {
         wp.pickedUp = true;
         this.passengerActive = true;
+        this.passengerDestination = wp.destination;
         this.passengerDistLeft = 150 + Math.random() * 110;
         this.passengerFare = 130 + Math.round(this.passengerDistLeft * 0.65);
         this.passengerDropoffSpawned = false;
         this.sound.playPickup();
         this.callbacks.onToast({
-          text: `যাত্রী উঠেছে! সামনে নামিয়ে দিলে ভাড়া ৳${toBn(this.passengerFare)}`,
+          text: `যাত্রী উঠেছে (${this.passengerDestination})! ভাড়া ৳${toBn(this.passengerFare)}`,
           tone: 'success',
         });
         this.scene.remove(wp.rig.group);
@@ -2598,6 +2898,115 @@ export class GameEngine {
       }
     }
 
+    // Random Events (road digging, strike procession, flooding, VIP convoy — 20-30s each)
+    if (!this.activeEventKind) {
+      this.nextEventCooldown -= dt;
+      if (this.nextEventCooldown <= 0) {
+        this.startRandomEvent();
+      }
+    } else {
+      this.activeEventTimer -= dt;
+      if (this.activeEventKind === 'road_digging') {
+        this.diggingSpawnAccum += distStep;
+        if (this.diggingSpawnAccum >= 44) {
+          this.diggingSpawnAccum = 0;
+          this.spawnDiggingBarriers();
+        }
+      } else if (this.activeEventKind === 'strike_procession') {
+        this.processionSpawnAccum += distStep;
+        if (this.processionSpawnAccum >= 22) {
+          this.processionSpawnAccum = 0;
+          this.spawnProtestWave();
+        }
+      } else if (this.activeEventKind === 'vip_convoy') {
+        this.vipSirenCooldown -= dt;
+        if (this.vipSirenCooldown <= 0) {
+          this.vipSirenCooldown = 3.2;
+          this.sound.playTrafficHornBurst('heavy', 2);
+        }
+        const vipCars = this.traffic.filter((v) => v.isVipConvoy);
+        if (
+          this.vipSpawned &&
+          !this.vipYieldAwarded &&
+          vipCars.length > 0 &&
+          vipCars.every((v) => v.z > 3.5)
+        ) {
+          this.vipYieldAwarded = true;
+          this.runTaka += 80;
+          this.score += 120;
+          this.sound.playCoinDing(2);
+          this.callbacks.onToast({
+            text: '🚨 ভিআইপি কনভয়কে সাইড দিয়েছেন! +৳৮০ বোনাস',
+            tone: 'success',
+            priority: 'gas',
+          });
+        }
+      }
+
+      if (this.activeEventTimer <= 0) {
+        this.endRandomEvent(true);
+      }
+    }
+
+    // Flooding surface mesh fade & wheel splash spray
+    if (this.floodWaterMesh) {
+      const targetFloodOpacity = this.activeEventKind === 'flooding' ? 0.52 : 0;
+      this.floodWaterMat.opacity = THREE.MathUtils.damp(this.floodWaterMat.opacity, targetFloodOpacity, 2.4, dt);
+      this.floodWaterMesh.visible = this.floodWaterMat.opacity > 0.02;
+      if (this.floodWaterMesh.visible) {
+        this.floodWaterMesh.position.z = -65;
+        if (this.playerSpeed > 10) {
+          this.floodSplashAccum += dt;
+          if (this.floodSplashAccum >= 0.08) {
+            this.floodSplashAccum = 0;
+            this.spawnDustBurst(this.playerX + (Math.random() < 0.5 ? -0.75 : 0.75), 0.14, 0.9, 2);
+          }
+        }
+      }
+    }
+
+    // Update Road Digging Barriers & collisions
+    for (let i = this.diggingBarriers.length - 1; i >= 0; i--) {
+      const b = this.diggingBarriers[i];
+      b.z += distStep;
+      b.rig.group.position.z = b.z;
+      b.rig.lampMat.emissiveIntensity = Math.sin(this.realTime * 10 + i) > 0 ? 3.2 : 0.35;
+
+      const hitX = Math.abs(b.x - this.playerX) < b.rig.halfWidth + 0.65;
+      const hitZ = Math.abs(b.z) < b.rig.halfLength + 1.25;
+      if (!b.hit && hitX && hitZ && this.invulnTimer <= 0) {
+        b.hit = true;
+        const hpLoss = Math.round(14 * chassisDmgMult);
+        this.hp -= hpLoss;
+        this.nationalDamage += 450;
+        this.invulnTimer = 0.75;
+        this.shakeTimer = 0.34;
+        this.shakeTrauma = Math.max(this.shakeTrauma, 0.8);
+        this.triggerCrashSlowMo(0.28);
+        this.playerSpeed = Math.max(8, this.playerSpeed * 0.52);
+        this.spawnDustBurst(b.x, 0.3, b.z, 10);
+        this.spawnDebrisBurst(b.x, 0.55, b.z, 12, 1.1);
+        this.sound.playCrash(true);
+        this.vibrate([45, 25, 50]);
+        this.callbacks.onCrashJuice?.('minor');
+        this.callbacks.onToast({
+          text: `🚧 রাস্তা খোঁড়ায় ধাক্কা! -${toBn(hpLoss)} HP ও ক্ষতি +৳৪৫০`,
+          tone: 'danger',
+          priority: 'crash',
+        });
+        if (this.hp <= 0) {
+          this.hp = 0;
+          this.handleGameOver('pedestrian');
+          return;
+        }
+      }
+
+      if (b.z > 24) {
+        this.scene.remove(b.rig.group);
+        this.diggingBarriers.splice(i, 1);
+      }
+    }
+
     // Spawn Yellow Gas / Pink Bribe Zones
     if (this.distanceSinceGasZone > (this.gas < 38 ? 110 : 190)) {
       this.distanceSinceGasZone = 0;
@@ -2616,7 +3025,7 @@ export class GameEngine {
       const onPad = Math.abs(z.z) < 5.6 && Math.abs(z.x - this.playerX) < 3.2;
       if (onPad) {
         if (z.type === 'gas') {
-          this.gas = Math.min(100, this.gas + 48 * dt);
+          this.gas = Math.min(100, this.gas + 48 * tankRefillMult * dt);
           if (this.gasZoneSoundCooldown <= 0) {
             this.sound.playGasRefill();
             this.gasZoneSoundCooldown = 0.55;
@@ -2649,16 +3058,19 @@ export class GameEngine {
           this.callbacks.onMissionProgress('bribes', 1);
         } else if (z.type === 'dropoff' && !z.triggered && this.passengerActive && this.playerSpeed < 19) {
           z.triggered = true;
+          const destLabel = this.passengerDestination;
           this.passengerActive = false;
+          this.passengerDestination = '';
           this.runTaka += this.passengerFare;
           this.score += 320;
           this.vibrate(25);
           this.sound.playFare();
           this.callbacks.onToast({
-            text: `যাত্রী নেমেছে! ভাড়া +৳${toBn(this.passengerFare)} পকেটে 💵`,
+            text: `${destLabel} পৌঁছেছে! ভাড়া +৳${toBn(this.passengerFare)} পকেটে 💵`,
             tone: 'success',
           });
           this.callbacks.onMissionProgress('passengers', 1);
+          this.callbacks.onDriverXpGain?.(180);
         }
       }
 
@@ -2735,7 +3147,7 @@ export class GameEngine {
         const fine = Math.min(Math.round(this.runTaka), 120);
         this.nationalDamage += dmg;
         this.runTaka -= fine;
-        this.hp -= 14;
+        this.hp -= Math.round(14 * chassisDmgMult);
         this.wanted = Math.min(5, this.wanted + 1);
         this.shakeTimer = 0.28;
         this.shakeTrauma = Math.max(this.shakeTrauma, 0.58);
@@ -2944,7 +3356,7 @@ export class GameEngine {
       const isSlowing = desiredSpeed < t.speed - 0.8 || t.speed < 1.8 || t.suddenStopTimer > 0;
       t.rig.setBraking(isSlowing);
       t.rig.setTurnSignal(t.turnSignalDir, blinkOn);
-      if (inLod && t.rig.isEmergency && t.rig.setEmergencyPhase) {
+      if ((inLod || t.isVipConvoy) && t.rig.isEmergency && t.rig.setEmergencyPhase) {
         t.rig.setEmergencyPhase(nowSec * 12);
       }
 
@@ -2988,13 +3400,18 @@ export class GameEngine {
       const hitZ = Math.abs(t.z) < t.rig.halfLength + playerHalfL - 0.18;
 
       if (hitX && hitZ) {
-        if (t.kind === 'bus' || t.kind === 'truck') {
+        if ((t.kind === 'bus' || t.kind === 'truck') && !t.isVipConvoy) {
           this.handleGameOver(t.kind);
           return;
         }
         if (this.invulnTimer <= 0) {
+          if (t.isVipConvoy) {
+            this.vipYieldAwarded = true;
+          }
           const baseMoney =
-            t.kind === 'car'
+            t.isVipConvoy
+              ? 4800
+              : t.kind === 'car'
               ? 3500
               : t.kind === 'cng_ai'
               ? 2200
@@ -3003,10 +3420,12 @@ export class GameEngine {
               : t.kind === 'thelagari'
               ? 1200
               : 1500;
+          const rawHpLoss = t.isVipConvoy ? 24 : 12;
+          const hpLoss = Math.round(rawHpLoss * chassisDmgMult);
           const dmgMoney = Math.round(baseMoney * (this.playerX < -0.55 ? 1.5 : 1.0));
           this.nationalDamage += dmgMoney;
-          this.hp -= 12;
-          this.wanted = Math.min(5, this.wanted + 1);
+          this.hp -= hpLoss;
+          this.wanted = Math.min(5, this.wanted + (t.isVipConvoy ? 2 : 1));
           this.invulnTimer = 0.75;
           this.shakeTimer = 0.38;
           this.shakeTrauma = Math.max(this.shakeTrauma, 0.88);
@@ -3024,7 +3443,9 @@ export class GameEngine {
           this.callbacks.onCrashJuice?.('minor');
           this.triggerCrowdReaction(t.x, t.z, 'crash', 1);
           this.callbacks.onToast({
-            text: `ধাক্কা! জাতীয় ক্ষতি +৳${toBn(dmgMoney)}!`,
+            text: t.isVipConvoy
+              ? `🚨 ভিআইপি কনভয়ে ধাক্কা! -${toBn(hpLoss)} HP ও ক্ষতি +৳${toBn(dmgMoney)}!`
+              : `ধাক্কা! জাতীয় ক্ষতি +৳${toBn(dmgMoney)}!`,
             tone: 'danger',
           });
           if (this.hp <= 0) {
@@ -3115,6 +3536,11 @@ export class GameEngine {
         p.rig.group.rotation.y = Math.atan2(dx, dz);
         p.animPhase += dt * 15;
         activePose = 'run';
+      } else if (p.isProtestor) {
+        p.z += (this.playerSpeed - p.walkSpeed) * dt;
+        p.rig.group.rotation.y = Math.PI;
+        p.animPhase += dt * 9.0;
+        activePose = 'wave';
       } else if (p.basePose === 'sit_tea_stall' || p.basePose === 'argue' || p.basePose === 'wave') {
         p.z += distStep;
         p.animPhase += dt * (p.basePose === 'argue' ? 7.5 : p.basePose === 'wave' ? 6.5 : 3.2);
@@ -3179,7 +3605,8 @@ export class GameEngine {
         } else {
           p.hitCooldown = 1.15;
           p.z += 2.6;
-          this.hp -= 22;
+          const pedHpLoss = Math.round(22 * chassisDmgMult);
+          this.hp -= pedHpLoss;
           this.shakeTimer = 0.32;
           this.shakeTrauma = Math.max(this.shakeTrauma, 0.74);
           this.triggerCrashSlowMo(0.24);
@@ -3188,7 +3615,7 @@ export class GameEngine {
           this.callbacks.onCrashJuice?.('minor');
           this.sound.playCrash(false);
           this.callbacks.onToast({
-            text: 'ক্ষুব্ধ পথচারী ধরে ফেলেছে! -২২ HP!',
+            text: `ক্ষুব্ধ পথচারী ধরে ফেলেছে! -${toBn(pedHpLoss)} HP!`,
             tone: 'danger',
           });
           if (this.hp <= 0) {

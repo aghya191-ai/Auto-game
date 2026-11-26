@@ -20,6 +20,7 @@ import {
 export {
   createCngModel,
   createVehicleModel,
+  createVipConvoyVehicle,
   type CngRig,
   type TrafficModelRig,
 } from './vehicleModels';
@@ -653,10 +654,11 @@ export function createAreaGantry(
 
 export function createZonePad(
   type: 'gas' | 'bribe' | 'dropoff' | 'pickup',
-  maxAnisotropy: number
+  maxAnisotropy: number,
+  label?: string
 ): THREE.Group {
   const group = new THREE.Group();
-  const padTex = createZonePadTexture(type, maxAnisotropy);
+  const padTex = createZonePadTexture(type, maxAnisotropy, label);
   const w = type === 'dropoff' || type === 'pickup' ? 4.4 : 4.8;
   const l = type === 'dropoff' || type === 'pickup' ? 8.5 : 8.8;
 
@@ -1063,4 +1065,125 @@ export function createTrafficLightModel(maxAnisotropy: number): TrafficLightRig 
   setState('green');
 
   return { group, setState };
+}
+
+export interface RoadDiggingRig {
+  group: THREE.Group;
+  lampMat: THREE.MeshStandardMaterial;
+  halfWidth: number;
+  halfLength: number;
+}
+
+export function createRoadDiggingBarrier(maxAnisotropy = 1): RoadDiggingRig {
+  const group = new THREE.Group();
+
+  const steelMat = new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.6 });
+  const coneMat = new THREE.MeshStandardMaterial({ color: '#f97316', roughness: 0.45 });
+  const stripeWhiteMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.5 });
+  const dirtMat = new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.96, flatShading: true });
+
+  // Striped red/white barricade board on steel legs
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.9, 0.55), steelMat);
+  legL.position.set(-0.95, 0.45, 0);
+  const legR = legL.clone();
+  legR.position.x = 0.95;
+
+  const boardCanvas = document.createElement('canvas');
+  boardCanvas.width = 256;
+  boardCanvas.height = 96;
+  const ctx = boardCanvas.getContext('2d')!;
+  ctx.fillStyle = '#facc15';
+  ctx.fillRect(0, 0, 256, 96);
+  ctx.fillStyle = '#dc2626';
+  for (let x = -40; x < 290; x += 48) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + 24, 0);
+    ctx.lineTo(x + 48, 96);
+    ctx.lineTo(x + 24, 96);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(28, 25, 23, 0.86)';
+  ctx.fillRect(16, 26, 224, 44);
+  ctx.fillStyle = '#fef08a';
+  ctx.font = "800 24px 'Hind Siliguri', sans-serif";
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('রাস্তা খোঁড়া · সাবধান!', 128, 49);
+
+  const boardTex = new THREE.CanvasTexture(boardCanvas);
+  boardTex.colorSpace = THREE.SRGBColorSpace;
+  boardTex.anisotropy = Math.min(4, maxAnisotropy);
+  const board = new THREE.Mesh(
+    new THREE.BoxGeometry(2.35, 0.64, 0.12),
+    new THREE.MeshBasicMaterial({ map: boardTex })
+  );
+  board.position.set(0, 0.88, 0.12);
+  board.castShadow = true;
+
+  // Dirt pile behind the barricade
+  const mound = new THREE.Mesh(new THREE.DodecahedronGeometry(0.92, 0), dirtMat);
+  mound.scale.set(1.25, 0.52, 1.15);
+  mound.position.set(0, 0.22, -0.92);
+
+  // Two orange safety cones in front
+  [-0.85, 0.85].forEach((cx) => {
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.62, 8), coneMat);
+    cone.position.set(cx, 0.31, 0.75);
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.15, 0.12, 8), stripeWhiteMat);
+    band.position.set(cx, 0.38, 0.75);
+    group.add(cone, band);
+  });
+
+  // Blinking amber hazard lamp on top
+  const lampMat = new THREE.MeshStandardMaterial({
+    color: '#fbbf24',
+    emissive: '#f59e0b',
+    emissiveIntensity: 2.2,
+    roughness: 0.2,
+  });
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8), lampMat);
+  lamp.position.set(0, 1.32, 0.12);
+
+  group.add(legL, legR, board, mound, lamp);
+  return { group, lampMat, halfWidth: 1.15, halfLength: 1.05 };
+}
+
+export function createProtestPlacard(
+  label: string,
+  bgHex: string,
+  maxAnisotropy = 1
+): THREE.Group {
+  const group = new THREE.Group();
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.025, 0.025, 1.25, 6),
+    new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.9 })
+  );
+  pole.position.y = 1.65;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 112;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = bgHex;
+  ctx.fillRect(0, 0, 256, 112);
+  ctx.strokeStyle = '#18181b';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(4, 4, 248, 104);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = "800 34px 'Hind Siliguri', sans-serif";
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, 128, 56, 224);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = Math.min(4, maxAnisotropy);
+  const signMat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 0.44), signMat);
+  sign.position.set(0, 2.32, 0.02);
+
+  group.add(pole, sign);
+  return group;
 }

@@ -3,11 +3,13 @@ import {
   AREAS,
   CNG_COLORS,
   CNG_STICKERS,
+  CNG_UPGRADES,
   pickRadioClip,
   RADIO_STATION_NAME,
 } from './config/chattogramData';
 import { GameEngine } from './three/GameEngine';
 import type {
+  CngUpgradeId,
   GameEventToast,
   GameOverSummary,
   GamePhase,
@@ -55,9 +57,11 @@ const INITIAL_HUD: HudSnapshot = {
   inGasZone: false,
   inBribeZone: false,
   passengerActive: false,
+  passengerDestination: '',
   passengerFare: 0,
   passengerDistLeft: 0,
   passengerNearPickup: false,
+  activeEvent: null,
   cameraMode: 'external',
   steerDir: 0,
   wrongWay: false,
@@ -129,7 +133,7 @@ export default function App() {
   hudRef.current = hud;
 
   const announcedRankLevelRef = useRef<number>(
-    getDriverProgression(save.highScore, save.completedMissionsTotal).current.level
+    getDriverProgression(save.highScore, save.completedMissionsTotal, save.driverXp).current.level
   );
 
   const pushFloatingPopup = useCallback((text: string, tone: 'gain' | 'damage') => {
@@ -387,6 +391,16 @@ export default function App() {
         onToast: (t) => pushToast(t),
         onCrashJuice: () => triggerCrashJuice(),
         onMissionProgress: handleMissionProgress,
+        onDriverXpGain: (xp) => {
+          setSave((prev) => {
+            const updated: PlayerSaveData = {
+              ...prev,
+              driverXp: prev.driverXp + xp,
+            };
+            savePlayerData(updated);
+            return updated;
+          });
+        },
         onGameOver: (summary) => {
           clearTimeout(toastHideTimerRef.current);
           clearTimeout(areaBannerTimerRef.current);
@@ -397,11 +411,13 @@ export default function App() {
           setAreaBanner(null);
           setGameOverSummary(summary);
           setPhase('gameover');
+          const runXp = Math.max(40, Math.round(summary.score * 0.25));
           setSave((prev) => {
             const updated: PlayerSaveData = {
               ...prev,
               taka: prev.taka + summary.runTaka,
               highScore: Math.max(prev.highScore, summary.score),
+              driverXp: prev.driverXp + runXp,
             };
             savePlayerData(updated);
             return updated;
@@ -410,7 +426,8 @@ export default function App() {
       },
       initialSave.equippedColor,
       initialSave.equippedSticker,
-      initialSave.highScore
+      initialSave.highScore,
+      initialSave.upgrades
     );
 
     engineRef.current = engine;
@@ -678,6 +695,37 @@ export default function App() {
     });
   };
 
+  const handleBuyUpgrade = (upgradeId: CngUpgradeId) => {
+    const item = CNG_UPGRADES.find((u) => u.id === upgradeId);
+    if (!item) return;
+
+    setSave((prev) => {
+      const level = prev.upgrades[upgradeId] ?? 0;
+      if (level >= 3) return prev;
+      const price = item.prices[level];
+      if (prev.taka < price) return prev;
+
+      const nextUpgrades = {
+        ...prev.upgrades,
+        [upgradeId]: level + 1,
+      };
+      const next: PlayerSaveData = {
+        ...prev,
+        taka: prev.taka - price,
+        upgrades: nextUpgrades,
+      };
+      savePlayerData(next);
+      engineRef.current?.updateUpgrades(nextUpgrades);
+      engineRef.current?.sound.playCoinDing(2);
+      pushToast({
+        text: `${item.name} ধাপ ${toBn(level + 1)} সম্পন্ন! 🔧`,
+        tone: 'success',
+        priority: 'level',
+      });
+      return next;
+    });
+  };
+
   const handleClaimMission = (missionId: string) => {
     setSave((prev) => {
       let gained = 0;
@@ -692,11 +740,12 @@ export default function App() {
       const next: PlayerSaveData = {
         ...prev,
         taka: prev.taka + gained,
+        driverXp: prev.driverXp + 200,
         missions: nextMissions,
       };
       savePlayerData(next);
       engineRef.current?.sound.playCoinDing(2);
-      pushToast({ text: `মিশন পুরস্কার +৳${toBn(gained)} পকেটে!`, tone: 'success', priority: 'level' });
+      pushToast({ text: `মিশন পুরস্কার +৳${toBn(gained)} ও +২০০ XP!`, tone: 'success', priority: 'level' });
       return next;
     });
   };
@@ -731,7 +780,11 @@ export default function App() {
     phase === 'playing' || phase === 'paused'
       ? Math.max(save.highScore, hud.score)
       : save.highScore;
-  const driverProgression = getDriverProgression(effectiveBestScore, save.completedMissionsTotal);
+  const driverProgression = getDriverProgression(
+    effectiveBestScore,
+    save.completedMissionsTotal,
+    save.driverXp
+  );
 
   useEffect(() => {
     const lvl = driverProgression.current.level;
@@ -956,6 +1009,7 @@ export default function App() {
           save={save}
           onBuyOrEquipColor={handleBuyOrEquipColor}
           onBuyOrEquipSticker={handleBuyOrEquipSticker}
+          onBuyUpgrade={handleBuyUpgrade}
           onClose={handleCloseGarage}
         />
       )}

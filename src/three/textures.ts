@@ -1023,7 +1023,8 @@ export function createBusSignTexture(
 
 export function createZonePadTexture(
   type: 'gas' | 'bribe' | 'dropoff' | 'pickup',
-  maxAnisotropy: number
+  maxAnisotropy: number,
+  label?: string
 ): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
@@ -1066,18 +1067,18 @@ export function createZonePadTexture(
     ctx.font = `700 36px ${FONT_STACK}`;
     ctx.fillText(isGas ? 'দাগে থামেন' : 'ওয়ান্টেড কমান', 256, 300);
   } else if (type === 'dropoff') {
-    ctx.fillStyle = 'rgba(6, 182, 212, 0.82)';
+    ctx.fillStyle = 'rgba(6, 182, 212, 0.86)';
     ctx.fillRect(0, 0, 512, 512);
     ctx.strokeStyle = '#ecfeff';
     ctx.lineWidth = 14;
     ctx.strokeRect(16, 16, 480, 480);
 
     ctx.fillStyle = '#083344';
-    ctx.font = `800 56px ${FONT_STACK}`;
+    ctx.font = `800 46px ${FONT_STACK}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('নামার জায়গা', 256, 200);
-    ctx.font = `700 36px ${FONT_STACK}`;
+    ctx.fillText(label ? `নামুন: ${label}` : 'নামার জায়গা', 256, 200, 440);
+    ctx.font = `700 34px ${FONT_STACK}`;
     ctx.fillText('ধীরে থামুন 💵', 256, 295);
   } else {
     ctx.fillStyle = 'rgba(16, 185, 129, 0.82)';
@@ -1092,7 +1093,7 @@ export function createZonePadTexture(
     ctx.textBaseline = 'middle';
     ctx.fillText('যাত্রী অপেক্ষায়!', 256, 205);
     ctx.font = `700 34px ${FONT_STACK}`;
-    ctx.fillText('কাছে গিয়ে থামুন 👋', 256, 295);
+    ctx.fillText(label ? `গন্তব্য: ${label} 👋` : 'কাছে গিয়ে থামুন 👋', 256, 295, 440);
   }
 
   return finalizeTexture(canvas, maxAnisotropy);
