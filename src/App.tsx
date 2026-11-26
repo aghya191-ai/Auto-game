@@ -65,6 +65,7 @@ const INITIAL_HUD: HudSnapshot = {
   nearestGasAhead: true,
   aheadHazard: null,
   aheadTrafficLight: null,
+  rearHazard: null,
   soundBombCooldown: 0,
   weather: 'sunny',
   atmosphereMode: 'day',

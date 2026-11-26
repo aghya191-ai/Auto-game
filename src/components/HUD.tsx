@@ -163,16 +163,14 @@ export function HUD({
                   <span className="text-stone-950/70">·</span>
                   <span className="comic-text-stroke text-white">জমা ৳{toBn(totalTaka + hud.runTaka)}</span>
                 </div>
-                {!isDriverView && (
-                  <div className="mt-0.5 flex items-center gap-1.5 leading-none">
-                    <span className="rounded border border-stone-950 bg-yellow-300 px-1 py-0.2 text-[9px] font-black text-stone-950">
-                      ক্ষতি
-                    </span>
-                    <span className="damage-text-3d text-base font-black text-yellow-300 sm:text-lg">
-                      ৳{toBn(hud.nationalDamage)}
-                    </span>
-                  </div>
-                )}
+                <div className="mt-0.5 flex items-center gap-1.5 leading-none">
+                  <span className="rounded border border-stone-950 bg-yellow-300 px-1 py-0.2 text-[9px] font-black text-stone-950">
+                    ক্ষতি
+                  </span>
+                  <span className="damage-text-3d text-base font-black text-yellow-300 sm:text-lg">
+                    ৳{toBn(hud.nationalDamage)}
+                  </span>
+                </div>
               </div>
 
               {comboCount >= 2 && (
@@ -188,123 +186,154 @@ export function HUD({
               )}
             </div>
 
-            {/* Single Slim Vitals + Rank Chip */}
-            <div className="pointer-events-auto sticker-chip rotate-[0.4deg] flex flex-wrap items-center gap-1.5 rounded-lg bg-[#fef6df]/95 px-2 py-0.5 text-[10px] font-black text-stone-950">
-              <span className="text-emerald-800">{hud.areaName}</span>
-              <span className="text-stone-400">·</span>
-              <span className="flex items-center gap-0.5 tabular-nums">
-                <Heart
-                  className={`h-3 w-3 stroke-[2.6] ${
-                    lowHp ? 'fill-red-500 text-red-700' : 'fill-emerald-500 text-emerald-700'
-                  }`}
-                />
-                <span className={lowHp ? 'text-red-700' : 'text-stone-950'}>{toBn(hud.hp)}</span>
-              </span>
-              {!isDriverView && (
-                <>
+            {isDriverView ? (
+              hud.chasedCount > 0 ? (
+                <div className="animate-crowd-shake sticker-chip rounded-lg bg-red-600/95 px-2 py-0.5 text-[10px] font-black text-yellow-300">
+                  পাবলিক পিছে! ({toBn(hud.chasedCount)})
+                </div>
+              ) : hud.aheadTrafficLight?.state === 'red' ? (
+                <div className="sticker-chip flex items-center gap-1 rounded-lg bg-red-500/95 px-2 py-0.5 text-[10px] font-black text-white tabular-nums">
+                  <span className="h-2 w-2 rounded-full border border-stone-950 bg-red-700" />
+                  <span>লাল বাতি · {toBn(hud.aheadTrafficLight.dist)} মি</span>
+                </div>
+              ) : hud.aheadHazard ? (
+                <div className="sticker-chip flex items-center gap-1 rounded-lg bg-red-600/95 px-2 py-0.5 text-[10px] font-black text-white tabular-nums">
+                  <AlertTriangle className="h-3 w-3 shrink-0 fill-yellow-300 text-stone-950" />
+                  <span>
+                    {hud.aheadHazard.label} · {toBn(hud.aheadHazard.dist)} মি
+                  </span>
+                </div>
+              ) : hud.wrongWay ? (
+                <div className="sticker-chip rounded-lg bg-cyan-300/95 px-2 py-0.5 text-[10px] font-black text-stone-950">
+                  উল্টো পথ · ×১.৫
+                </div>
+              ) : hud.passengerActive ? (
+                <div className="sticker-chip flex items-center gap-1 rounded-lg bg-emerald-400/95 px-2 py-0.5 text-[10px] font-black text-stone-950 tabular-nums">
+                  <UserCheck className="h-3 w-3 shrink-0" />
+                  <span>যাত্রী {toBn(hud.passengerDistLeft)} মি</span>
+                </div>
+              ) : hud.passengerNearPickup ? (
+                <div className="sticker-chip rounded-lg bg-cyan-300/95 px-2 py-0.5 text-[10px] font-black text-stone-950">
+                  যাত্রী তুলুন
+                </div>
+              ) : null
+            ) : (
+              <>
+                {/* Single Slim Vitals + Rank Chip */}
+                <div className="pointer-events-auto sticker-chip rotate-[0.4deg] flex flex-wrap items-center gap-1.5 rounded-lg bg-[#fef6df]/95 px-2 py-0.5 text-[10px] font-black text-stone-950">
+                  <span className="text-emerald-800">{hud.areaName}</span>
+                  <span className="text-stone-400">·</span>
+                  <span className="flex items-center gap-0.5 tabular-nums">
+                    <Heart
+                      className={`h-3 w-3 stroke-[2.6] ${
+                        lowHp ? 'fill-red-500 text-red-700' : 'fill-emerald-500 text-emerald-700'
+                      }`}
+                    />
+                    <span className={lowHp ? 'text-red-700' : 'text-stone-950'}>{toBn(hud.hp)}</span>
+                  </span>
                   <span className="text-stone-400">·</span>
                   <span className="text-orange-700 tabular-nums">{toBn(hud.speedKmh)} কিমি/ঘ</span>
-                </>
-              )}
-              <span className="text-stone-400">·</span>
-              <span className="text-sky-800 tabular-nums">লে.{toBn(driverProgression.current.level)}</span>
-              {hud.wanted > 0 && (
-                <>
                   <span className="text-stone-400">·</span>
-                  <span className="flex items-center gap-0.5">
-                    {[1, 2, 3, 4, 5].map((n) => (
-                      <Star
-                        key={n}
-                        className={`h-2.5 w-2.5 ${
-                          n <= hud.wanted
-                            ? 'fill-pink-500 text-stone-950'
-                            : 'fill-stone-300 text-stone-500'
-                        }`}
-                      />
-                    ))}
-                  </span>
-                </>
-              )}
-            </div>
+                  <span className="text-sky-800 tabular-nums">লে.{toBn(driverProgression.current.level)}</span>
+                  {hud.wanted > 0 && (
+                    <>
+                      <span className="text-stone-400">·</span>
+                      <span className="flex items-center gap-0.5">
+                        {[1, 2, 3, 4, 5].map((n) => (
+                          <Star
+                            key={n}
+                            className={`h-2.5 w-2.5 ${
+                              n <= hud.wanted
+                                ? 'fill-pink-500 text-stone-950'
+                                : 'fill-stone-300 text-stone-500'
+                            }`}
+                          />
+                        ))}
+                      </span>
+                    </>
+                  )}
+                </div>
 
-            {/* Compact Conditional Alerts (never crowding center 60%) */}
-            {hud.chasedCount > 0 && (
-              <div className="animate-crowd-shake sticker-chip rounded-lg bg-red-600 px-2 py-0.5 text-[10px] font-black text-yellow-300">
-                পাবলিক পিছে! ({toBn(hud.chasedCount)})
-              </div>
+                {/* Compact Conditional Alerts (never crowding center 60%) */}
+                {hud.chasedCount > 0 && (
+                  <div className="animate-crowd-shake sticker-chip rounded-lg bg-red-600 px-2 py-0.5 text-[10px] font-black text-yellow-300">
+                    পাবলিক পিছে! ({toBn(hud.chasedCount)})
+                  </div>
+                )}
+
+                {hud.wrongWay && (
+                  <div className="sticker-chip rotate-1 rounded-lg bg-cyan-300 px-2 py-0.5 text-[10px] font-black text-stone-950">
+                    উল্টো পথ · ×১.৫
+                  </div>
+                )}
+
+                {hud.aheadHazard && (
+                  <div className="sticker-chip -rotate-1 flex items-center gap-1 rounded-lg bg-red-600 px-2 py-0.5 text-[10px] font-black text-white tabular-nums">
+                    <AlertTriangle className="h-3 w-3 shrink-0 fill-yellow-300 text-stone-950" />
+                    <span>{hud.aheadHazard.label}</span>
+                    <span className="rounded bg-yellow-300 px-1 text-stone-950">{toBn(hud.aheadHazard.dist)} মি</span>
+                  </div>
+                )}
+
+                {hud.aheadTrafficLight && (
+                  <div
+                    className={`sticker-chip flex items-center gap-1.5 rounded-lg px-2 py-0.5 text-[10px] font-black tabular-nums ${
+                      hud.aheadTrafficLight.state === 'red'
+                        ? 'bg-red-500 text-white'
+                        : hud.aheadTrafficLight.state === 'yellow'
+                        ? 'bg-yellow-300 text-stone-950'
+                        : 'bg-emerald-400 text-stone-950'
+                    }`}
+                  >
+                    <span
+                      className={`h-2.5 w-2.5 rounded-full border border-stone-950 ${
+                        hud.aheadTrafficLight.state === 'red'
+                          ? 'bg-red-700'
+                          : hud.aheadTrafficLight.state === 'yellow'
+                          ? 'bg-amber-400'
+                          : 'bg-emerald-500'
+                      }`}
+                    />
+                    <span>
+                      {hud.aheadTrafficLight.state === 'red'
+                        ? 'লাল বাতি'
+                        : hud.aheadTrafficLight.state === 'yellow'
+                        ? 'হলুদ বাতি'
+                        : 'সবুজ বাতি'}
+                    </span>
+                    <span>
+                      {toBn(hud.aheadTrafficLight.dist)} মি · {toBn(hud.aheadTrafficLight.timeLeft)} সে
+                    </span>
+                  </div>
+                )}
+
+                {hud.inGasZone && (
+                  <div className="sticker-chip rounded-lg bg-yellow-300 px-2 py-0.5 text-[10px] font-black text-stone-950">
+                    দাগের ওপর থামেন, গ্যাস ভরছে!
+                  </div>
+                )}
+
+                {hud.passengerActive ? (
+                  <div className="sticker-chip flex items-center gap-1 rounded-lg bg-emerald-400 px-2 py-0.5 text-[10px] font-black text-stone-950 tabular-nums">
+                    <UserCheck className="h-3 w-3 shrink-0" />
+                    <span>
+                      যাত্রী {toBn(hud.passengerDistLeft)} মি (৳{toBn(hud.passengerFare)})
+                    </span>
+                  </div>
+                ) : hud.passengerNearPickup ? (
+                  <div className="sticker-chip rounded-lg bg-cyan-300 px-2 py-0.5 text-[10px] font-black text-stone-950">
+                    যাত্রী হাত দেখাচ্ছে — থেমে তুলুন!
+                  </div>
+                ) : null}
+              </>
             )}
-
-            {hud.wrongWay && (
-              <div className="sticker-chip rotate-1 rounded-lg bg-cyan-300 px-2 py-0.5 text-[10px] font-black text-stone-950">
-                উল্টো পথ · ×১.৫
-              </div>
-            )}
-
-            {hud.aheadHazard && (
-              <div className="sticker-chip -rotate-1 flex items-center gap-1 rounded-lg bg-red-600 px-2 py-0.5 text-[10px] font-black text-white tabular-nums">
-                <AlertTriangle className="h-3 w-3 shrink-0 fill-yellow-300 text-stone-950" />
-                <span>{hud.aheadHazard.label}</span>
-                <span className="rounded bg-yellow-300 px-1 text-stone-950">{toBn(hud.aheadHazard.dist)} মি</span>
-              </div>
-            )}
-
-            {hud.aheadTrafficLight && (
-              <div
-                className={`sticker-chip flex items-center gap-1.5 rounded-lg px-2 py-0.5 text-[10px] font-black tabular-nums ${
-                  hud.aheadTrafficLight.state === 'red'
-                    ? 'bg-red-500 text-white'
-                    : hud.aheadTrafficLight.state === 'yellow'
-                    ? 'bg-yellow-300 text-stone-950'
-                    : 'bg-emerald-400 text-stone-950'
-                }`}
-              >
-                <span
-                  className={`h-2.5 w-2.5 rounded-full border border-stone-950 ${
-                    hud.aheadTrafficLight.state === 'red'
-                      ? 'bg-red-700'
-                      : hud.aheadTrafficLight.state === 'yellow'
-                      ? 'bg-amber-400'
-                      : 'bg-emerald-500'
-                  }`}
-                />
-                <span>
-                  {hud.aheadTrafficLight.state === 'red'
-                    ? 'লাল বাতি'
-                    : hud.aheadTrafficLight.state === 'yellow'
-                    ? 'হলুদ বাতি'
-                    : 'সবুজ বাতি'}
-                </span>
-                <span>
-                  {toBn(hud.aheadTrafficLight.dist)} মি · {toBn(hud.aheadTrafficLight.timeLeft)} সে
-                </span>
-              </div>
-            )}
-
-            {hud.inGasZone && !isDriverView && (
-              <div className="sticker-chip rounded-lg bg-yellow-300 px-2 py-0.5 text-[10px] font-black text-stone-950">
-                দাগের ওপর থামেন, গ্যাস ভরছে!
-              </div>
-            )}
-
-            {hud.passengerActive ? (
-              <div className="sticker-chip flex items-center gap-1 rounded-lg bg-emerald-400 px-2 py-0.5 text-[10px] font-black text-stone-950 tabular-nums">
-                <UserCheck className="h-3 w-3 shrink-0" />
-                <span>
-                  যাত্রী {toBn(hud.passengerDistLeft)} মি (৳{toBn(hud.passengerFare)})
-                </span>
-              </div>
-            ) : hud.passengerNearPickup ? (
-              <div className="sticker-chip rounded-lg bg-cyan-300 px-2 py-0.5 text-[10px] font-black text-stone-950">
-                যাত্রী হাত দেখাচ্ছে — থেমে তুলুন!
-              </div>
-            ) : null}
           </div>
         )}
 
         {/* Top-Right: Single Round Expandable Menu Button + Compact Gas + Small Minimap */}
         <div className="relative flex flex-col items-end gap-1.5">
           <div className="pointer-events-auto flex items-center justify-end gap-1.5">
-            {!cleanMode && !isDriverView && (
+            {!cleanMode && (
               <div
                 className={`cng-plate relative flex h-8 min-w-[74px] items-center justify-center overflow-hidden rounded-xl bg-stone-900 px-2 tabular-nums ${
                   lowGas ? 'border-red-500' : ''

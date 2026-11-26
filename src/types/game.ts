@@ -159,6 +159,7 @@ export interface HudSnapshot {
   nearestGasAhead: boolean;
   aheadHazard: { label: string; sub: string; dist: number } | null;
   aheadTrafficLight: { state: TrafficLightState; dist: number; timeLeft: number } | null;
+  rearHazard: string | null;
   weather: WeatherCondition;
   atmosphereMode: AtmosphereMode;
   graphicsQuality: GraphicsQuality;

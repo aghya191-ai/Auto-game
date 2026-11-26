@@ -32,12 +32,18 @@ import {
   createPedestrianModel,
   createRoadDivider,
   createStreetLight,
+  createTeaStallBench,
   createTrafficLightModel,
   createVehicleModel,
   createZonePad,
+  disposePedestrianAssetPool,
+  pickRandomPedestrianStyle,
   type CngRig,
   type CockpitRig,
+  type PedestrianPose,
   type PedestrianRig,
+  type PedestrianStyle,
+  type SpeechCategory,
   type TrafficLightRig,
   type TrafficModelRig,
 } from './models';
@@ -63,10 +69,18 @@ const _targetSunDir = new THREE.Vector3();
 const _camTargetPos = new THREE.Vector3();
 const _camLookAt = new THREE.Vector3();
 const _puffDummy = new THREE.Object3D();
+const _dustDummy = new THREE.Object3D();
 
 const LANES = [-6.0, -2.8, 2.8, 6.0];
 const RAIN_COUNT = 340;
 const PUFF_COUNT = 28;
+const DUST_COUNT = 36;
+const MAX_DETAILED_PEDESTRIANS = 25;
+
+interface LodEntry {
+  rig: PedestrianRig;
+  distSq: number;
+}
 
 interface ExhaustPuff {
   active: boolean;
@@ -115,13 +129,22 @@ interface TrafficEntity {
 
 interface PedestrianEntity {
   rig: PedestrianRig;
+  propGroup?: THREE.Group;
   x: number;
   z: number;
+  baseY: number;
   walkDir: number;
   walkSpeed: number;
+  basePose: PedestrianPose;
   isChasing: boolean;
+  canCollide: boolean;
   hitCooldown: number;
   animPhase: number;
+  jumpBackTimer: number;
+  fallTimer: number;
+  speechTimer: number;
+  reactYaw: number;
+  reactTimer: number;
 }
 
 interface ZoneEntity {
@@ -200,6 +223,15 @@ export class GameEngine {
   private puffPool: ExhaustPuff[] = [];
   private puffCursor = 0;
   private puffEmitAccum = 0;
+  private dustMesh!: THREE.InstancedMesh;
+  private dustPool: ExhaustPuff[] = [];
+  private dustCursor = 0;
+  private lodScratch: LodEntry[] = [];
+  private leftMirrorRT!: THREE.WebGLRenderTarget;
+  private rightMirrorRT!: THREE.WebGLRenderTarget;
+  private leftMirrorCam!: THREE.PerspectiveCamera;
+  private rightMirrorCam!: THREE.PerspectiveCamera;
+  private mirrorFrameCounter = 0;
   private isSoftwareGl = false;
   private maxAnisotropy = 1;
 
@@ -637,6 +669,27 @@ export class GameEngine {
       this.maxAnisotropy
     );
     this.cockpitRig = createCockpitModel(this.equippedColorHex);
+
+    // Live Rear-View Looking Glass Render Targets & Cameras (rendered only in Driver View)
+    this.leftMirrorRT = new THREE.WebGLRenderTarget(160, 160, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      depthBuffer: true,
+    });
+    this.rightMirrorRT = new THREE.WebGLRenderTarget(160, 160, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      depthBuffer: true,
+    });
+    this.leftMirrorCam = new THREE.PerspectiveCamera(62, 1, 0.25, 160);
+    this.rightMirrorCam = new THREE.PerspectiveCamera(62, 1, 0.25, 160);
+    this.cockpitRig.leftMirrorMat.map = this.leftMirrorRT.texture;
+    this.cockpitRig.leftMirrorMat.color.set('#ffffff');
+    this.cockpitRig.leftMirrorMat.needsUpdate = true;
+    this.cockpitRig.rightMirrorMat.map = this.rightMirrorRT.texture;
+    this.cockpitRig.rightMirrorMat.color.set('#ffffff');
+    this.cockpitRig.rightMirrorMat.needsUpdate = true;
+
     this.cngRig.group.add(this.cockpitRig.group);
     this.cngRig.group.position.set(2.8, 0, 0);
     this.scene.add(this.cngRig.group);
@@ -672,6 +725,37 @@ export class GameEngine {
     }
     this.exhaustMesh.instanceMatrix.needsUpdate = true;
     this.scene.add(this.exhaustMesh);
+
+    // Pooled Stumble/Fall Dust Burst InstancedMesh (Zero GC, No Gore)
+    const dustGeo = new THREE.SphereGeometry(0.24, 6, 5);
+    const dustMat = new THREE.MeshBasicMaterial({
+      color: '#d6c3a1',
+      transparent: true,
+      opacity: 0.52,
+      depthWrite: false,
+    });
+    this.dustMesh = new THREE.InstancedMesh(dustGeo, dustMat, DUST_COUNT);
+    this.dustMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.dustMesh.frustumCulled = false;
+    _dustDummy.scale.setScalar(0);
+    _dustDummy.updateMatrix();
+    this.dustPool = [];
+    for (let i = 0; i < DUST_COUNT; i++) {
+      this.dustPool.push({
+        active: false,
+        x: 0,
+        y: 0,
+        z: 0,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        age: 0,
+        maxAge: 0.6,
+      });
+      this.dustMesh.setMatrixAt(i, _dustDummy.matrix);
+    }
+    this.dustMesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(this.dustMesh);
 
     if (!this.isSoftwareGl) {
       this.renderer.compile(this.scene, this.camera);
@@ -793,11 +877,22 @@ export class GameEngine {
     this.sound.playHorn();
     this.callbacks.onMissionProgress('horns', 1);
 
-    // Startle nearby non-chasing pedestrians and nudge blocking cars ahead
+    // Startle nearby non-chasing pedestrians (jump back!) and nudge blocking cars ahead
+    let hornTalkers = 0;
     for (const ped of this.pedestrians) {
-      if (!ped.isChasing && Math.abs(ped.z) < 28 && Math.abs(ped.x - this.playerX) < 5.5) {
-        ped.walkDir = ped.x >= this.playerX ? 1 : -1;
-        ped.walkSpeed = 6.5;
+      if (!ped.isChasing && ped.fallTimer <= 0 && Math.abs(ped.z) < 28 && Math.abs(ped.x - this.playerX) < 6.4) {
+        if (ped.basePose !== 'sit_tea_stall') {
+          ped.jumpBackTimer = 0.58;
+          ped.walkDir = ped.x >= this.playerX ? 1 : -1;
+          ped.walkSpeed = 6.8;
+        }
+        ped.reactYaw = Math.atan2(this.playerX - ped.x, 0 - ped.z);
+        ped.reactTimer = 1.4;
+        if (hornTalkers < 2 && Math.random() < 0.65) {
+          hornTalkers++;
+          ped.rig.showSpeech('horn');
+          ped.speechTimer = 1.7;
+        }
       }
     }
     for (const t of this.traffic) {
@@ -820,12 +915,21 @@ export class GameEngine {
     this.callbacks.onMissionProgress('horns', 2);
 
     // Clear agile cars out of player lane & scatter nearby pedestrians
+    let talkers = 0;
     for (const ped of this.pedestrians) {
       if (Math.abs(ped.z) < 35) {
         ped.isChasing = false;
         ped.rig.alertBadge.visible = false;
-        ped.walkDir = ped.x >= this.playerX ? 1 : -1;
-        ped.walkSpeed = 8.5;
+        if (ped.basePose !== 'sit_tea_stall' && ped.fallTimer <= 0) {
+          ped.jumpBackTimer = 0.65;
+          ped.walkDir = ped.x >= this.playerX ? 1 : -1;
+          ped.walkSpeed = 8.5;
+        }
+        if (talkers < 3) {
+          talkers++;
+          ped.rig.showSpeech('horn');
+          ped.speechTimer = 1.8;
+        }
       }
     }
     for (const t of this.traffic) {
@@ -1084,6 +1188,8 @@ export class GameEngine {
     this.spawnAreaGantry(firstArea.name, firstArea.tagline, firstArea.accentColor, -75);
     this.callbacks.onAreaEnter(firstArea.name, firstArea.tagline, 1);
 
+    this.spawnInitialPedestrians();
+
     this.setPhase('playing');
     this.emitHud();
   }
@@ -1091,7 +1197,10 @@ export class GameEngine {
   private clearDynamicEntities(): void {
     for (const t of this.traffic) this.scene.remove(t.rig.group);
     this.traffic = [];
-    for (const p of this.pedestrians) this.scene.remove(p.rig.group);
+    for (const p of this.pedestrians) {
+      this.scene.remove(p.rig.group);
+      if (p.propGroup) this.scene.remove(p.propGroup);
+    }
     this.pedestrians = [];
     for (const z of this.zones) this.scene.remove(z.group);
     this.zones = [];
@@ -1105,6 +1214,7 @@ export class GameEngine {
     for (const tl of this.trafficLights) this.scene.remove(tl.rig.group);
     this.trafficLights = [];
     this.resetExhaustPuffs();
+    this.resetDustPuffs();
   }
 
   private resetExhaustPuffs(): void {
@@ -1116,6 +1226,68 @@ export class GameEngine {
       this.exhaustMesh.setMatrixAt(i, _puffDummy.matrix);
     }
     this.exhaustMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  private resetDustPuffs(): void {
+    if (!this.dustMesh) return;
+    _dustDummy.scale.setScalar(0);
+    _dustDummy.updateMatrix();
+    for (let i = 0; i < this.dustPool.length; i++) {
+      this.dustPool[i].active = false;
+      this.dustMesh.setMatrixAt(i, _dustDummy.matrix);
+    }
+    this.dustMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  private spawnDustBurst(x: number, y: number, z: number, count = 8): void {
+    if (!this.dustMesh) return;
+    for (let i = 0; i < count; i++) {
+      const puff = this.dustPool[this.dustCursor];
+      this.dustCursor = (this.dustCursor + 1) % DUST_COUNT;
+      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.5;
+      const spd = 1.6 + Math.random() * 2.2;
+      puff.active = true;
+      puff.x = x + (Math.random() - 0.5) * 0.35;
+      puff.y = y + Math.random() * 0.25;
+      puff.z = z + (Math.random() - 0.5) * 0.35;
+      puff.vx = Math.cos(angle) * spd;
+      puff.vy = 0.9 + Math.random() * 1.1;
+      puff.vz = Math.sin(angle) * spd;
+      puff.age = 0;
+      puff.maxAge = 0.55 + Math.random() * 0.25;
+    }
+  }
+
+  private updateDustPuffs(dt: number, distStep: number): void {
+    if (!this.dustMesh) return;
+    let dirty = false;
+    for (let i = 0; i < DUST_COUNT; i++) {
+      const p = this.dustPool[i];
+      if (!p.active) continue;
+      p.age += dt;
+      if (p.age >= p.maxAge) {
+        p.active = false;
+        _dustDummy.scale.setScalar(0);
+        _dustDummy.updateMatrix();
+        this.dustMesh.setMatrixAt(i, _dustDummy.matrix);
+        dirty = true;
+        continue;
+      }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy -= 1.4 * dt;
+      p.z += p.vz * dt + distStep;
+      const t = p.age / p.maxAge;
+      const s = t < 0.35 ? 0.5 + t * 4.0 : Math.max(0.01, (1 - t) * 2.8);
+      _dustDummy.position.set(p.x, Math.max(0.1, p.y), p.z);
+      _dustDummy.scale.setScalar(s);
+      _dustDummy.updateMatrix();
+      this.dustMesh.setMatrixAt(i, _dustDummy.matrix);
+      dirty = true;
+    }
+    if (dirty) {
+      this.dustMesh.instanceMatrix.needsUpdate = true;
+    }
   }
 
   private updateExhaustPuffs(dt: number, boosting: boolean): void {
@@ -1307,26 +1479,167 @@ export class GameEngine {
     });
   }
 
-  private spawnPedestrian(): void {
-    const shirts = ['#f97316', '#06b6d4', '#eab308', '#ec4899', '#f8fafc', '#22c55e'];
-    const rig = createPedestrianModel(shirts[Math.floor(Math.random() * shirts.length)], false);
-    const fromLeft = Math.random() < 0.5;
-    const jaywalks = Math.random() < 0.62 + this.wanted * 0.06;
-    const startX = jaywalks ? (fromLeft ? -9.2 : 9.2) : fromLeft ? -9.8 : 9.8;
-    const startZ = -136 - Math.random() * 20;
+  private spawnInitialPedestrians(): void {
+    const initialZs = [-18, -32, -46, -60, -76, -92, -108, -124];
+    for (const z of initialZs) {
+      this.spawnPedestrian(z);
+    }
+  }
 
-    rig.group.position.set(startX, 0, startZ);
+  private spawnPedestrian(forcedZ?: number): void {
+    if (this.pedestrians.length >= 42) return;
+    const side: -1 | 1 = Math.random() < 0.5 ? -1 : 1;
+    const baseZ = forcedZ ?? -136 - Math.random() * 20;
+    const roll = Math.random();
+
+    if (roll < 0.16 && this.pedestrians.length <= 39) {
+      // Roadside Tea-Stall Sitters on wooden bench along brick sidewalk (y = 0.20)
+      const benchX = side * 11.15;
+      const bench = createTeaStallBench(this.maxAnisotropy);
+      bench.position.set(benchX, 0.20, baseZ);
+      this.scene.add(bench);
+
+      const benchStyles: PedestrianStyle[] = ['lungi_shirt', 'panjabi', 'rickshaw_puller', 'office_wear'];
+      for (let k = 0; k < 2; k++) {
+        const s = benchStyles[Math.floor(Math.random() * benchStyles.length)];
+        const rig = createPedestrianModel({
+          style: s,
+          withTeaCup: true,
+          maxAnisotropy: this.maxAnisotropy,
+        });
+        const px = benchX - side * 0.08;
+        const pz = baseZ + (k === 0 ? -0.45 : 0.45);
+        rig.group.position.set(px, 0.20, pz);
+        rig.group.rotation.y = side === 1 ? -Math.PI / 2 : Math.PI / 2;
+        this.scene.add(rig.group);
+        this.pedestrians.push({
+          rig,
+          propGroup: k === 0 ? bench : undefined,
+          x: px,
+          z: pz,
+          baseY: 0.20,
+          walkDir: 0,
+          walkSpeed: 0,
+          basePose: 'sit_tea_stall',
+          isChasing: false,
+          canCollide: false,
+          hitCooldown: 0,
+          animPhase: Math.random() * Math.PI * 2,
+          jumpBackTimer: 0,
+          fallTimer: 0,
+          speechTimer: 0,
+          reactYaw: side === 1 ? -Math.PI / 2 : Math.PI / 2,
+          reactTimer: 0,
+        });
+      }
+      return;
+    }
+
+    if (roll < 0.30 && this.pedestrians.length <= 39) {
+      // Arguing pair on sidewalk edge
+      const px = side * 9.55;
+      for (let k = 0; k < 2; k++) {
+        const rig = createPedestrianModel({
+          style: pickRandomPedestrianStyle(),
+          maxAnisotropy: this.maxAnisotropy,
+        });
+        const pz = baseZ + (k === 0 ? -0.55 : 0.55);
+        const yaw = k === 0 ? 0 : Math.PI;
+        rig.group.position.set(px, 0.20, pz);
+        rig.group.rotation.y = yaw;
+        this.scene.add(rig.group);
+        this.pedestrians.push({
+          rig,
+          x: px,
+          z: pz,
+          baseY: 0.20,
+          walkDir: 0,
+          walkSpeed: 0,
+          basePose: 'argue',
+          isChasing: false,
+          canCollide: false,
+          hitCooldown: 0,
+          animPhase: Math.random() * Math.PI * 2,
+          jumpBackTimer: 0,
+          fallTimer: 0,
+          speechTimer: 0,
+          reactYaw: yaw,
+          reactTimer: 0,
+        });
+      }
+      return;
+    }
+
+    if (roll < 0.38) {
+      // Traffic Police on curb edge waving/directing traffic
+      const rig = createPedestrianModel({
+        style: 'traffic_police',
+        maxAnisotropy: this.maxAnisotropy,
+      });
+      const px = side * 8.95;
+      const yaw = side === 1 ? -Math.PI / 2 : Math.PI / 2;
+      rig.group.position.set(px, 0.20, baseZ);
+      rig.group.rotation.y = yaw;
+      this.scene.add(rig.group);
+      this.pedestrians.push({
+        rig,
+        x: px,
+        z: baseZ,
+        baseY: 0.20,
+        walkDir: 0,
+        walkSpeed: 0,
+        basePose: 'wave',
+        isChasing: false,
+        canCollide: false,
+        hitCooldown: 0,
+        animPhase: Math.random() * Math.PI * 2,
+        jumpBackTimer: 0,
+        fallTimer: 0,
+        speechTimer: 0,
+        reactYaw: yaw,
+        reactTimer: 0,
+      });
+      return;
+    }
+
+    // Active road/curb pedestrians: jaywalkers (cross_unaware), bag carriers, sidewalk strollers
+    const jaywalks = roll < 0.72 + this.wanted * 0.04;
+    const carryBag = !jaywalks && Math.random() < 0.65;
+    const style = pickRandomPedestrianStyle();
+    const rig = createPedestrianModel({
+      style: style === 'traffic_police' ? 'office_wear' : style,
+      carryBag,
+      maxAnisotropy: this.maxAnisotropy,
+    });
+    const fromLeft = side === -1;
+    const startX = jaywalks ? (fromLeft ? -8.8 : 8.8) : fromLeft ? -9.5 : 9.5;
+    const baseY = Math.abs(startX) >= 8.7 ? 0.20 : 0;
+    const basePose: PedestrianPose = jaywalks
+      ? 'cross_unaware'
+      : carryBag
+      ? 'carry_bags'
+      : 'walk';
+
+    rig.group.position.set(startX, baseY, baseZ);
     this.scene.add(rig.group);
 
     this.pedestrians.push({
       rig,
       x: startX,
-      z: startZ,
+      z: baseZ,
+      baseY,
       walkDir: jaywalks ? (fromLeft ? 1 : -1) : 0,
-      walkSpeed: jaywalks ? 2.5 + Math.random() * 1.9 : 1.4,
+      walkSpeed: jaywalks ? 2.4 + Math.random() * 1.8 : 1.5 + Math.random() * 0.7,
+      basePose,
       isChasing: false,
+      canCollide: true,
       hitCooldown: 0,
       animPhase: Math.random() * Math.PI * 2,
+      jumpBackTimer: 0,
+      fallTimer: 0,
+      speechTimer: 0,
+      reactYaw: Math.PI,
+      reactTimer: 0,
     });
   }
 
@@ -1335,8 +1648,14 @@ export class GameEngine {
     const x = side * 7.6;
     const z = -142;
 
-    const rig = createPedestrianModel('#10b981', true);
-    rig.group.position.set(side * 9.3, 0, z);
+    const passengerStyles: PedestrianStyle[] = ['office_wear', 'saree', 'panjabi', 'lungi_shirt', 'burqa', 'school_uniform'];
+    const rig = createPedestrianModel({
+      style: passengerStyles[Math.floor(Math.random() * passengerStyles.length)],
+      isWaitingPassenger: true,
+      carryBag: Math.random() < 0.45,
+      maxAnisotropy: this.maxAnisotropy,
+    });
+    rig.group.position.set(side * 9.3, 0.20, z);
     rig.group.rotation.y = side === 1 ? -Math.PI / 2 : Math.PI / 2;
 
     const pad = createZonePad('pickup', this.maxAnisotropy);
@@ -1364,6 +1683,43 @@ export class GameEngine {
     pad.position.set(laneX, 0, -145);
     this.scene.add(pad);
     this.zones.push({ group: pad, type, x: laneX, z: -145, triggered: false });
+  }
+
+  private triggerCrowdReaction(
+    originX: number,
+    originZ: number,
+    category: SpeechCategory,
+    chaseQuota: number
+  ): void {
+    let chasersAdded = 0;
+    let bubblesShown = 0;
+
+    for (const p of this.pedestrians) {
+      if (Math.abs(p.z - originZ) > 26 || Math.abs(p.x - originX) > 12) continue;
+
+      // Nearby pedestrians turn toward player and shout short Bangla lines
+      p.reactYaw = Math.atan2(this.playerX - p.x, 0 - p.z);
+      p.reactTimer = 2.6;
+
+      if (bubblesShown < 4 && p.speechTimer <= 0.1) {
+        bubblesShown++;
+        p.rig.showSpeech(category);
+        p.speechTimer = 2.4;
+      }
+
+      if (
+        chasersAdded < chaseQuota &&
+        p.canCollide &&
+        !p.isChasing &&
+        p.fallTimer <= 0 &&
+        Math.abs(p.x - originX) < 8.5 &&
+        Math.abs(p.z - originZ) < 16
+      ) {
+        chasersAdded++;
+        p.isChasing = true;
+        p.rig.alertBadge.visible = true;
+      }
+    }
   }
 
   private handleGameOver(reason: DeathReason): void {
@@ -1454,6 +1810,23 @@ export class GameEngine {
       }
     }
 
+    // Rear hazard check for Driver View looking glass badge ("পেছনে বাস" etc.)
+    let rearHazard: string | null = null;
+    let nearestRearZ = 999;
+    for (const t of this.traffic) {
+      if (t.z > 1.4 && t.z < 24 && Math.abs(t.x - this.playerX) < 3.6 && t.z < nearestRearZ) {
+        nearestRearZ = t.z;
+        rearHazard =
+          t.kind === 'bus'
+            ? 'পেছনে বাস'
+            : t.kind === 'truck'
+            ? 'পেছনে ট্রাক'
+            : t.kind === 'car'
+            ? 'পেছনে গাড়ি'
+            : 'পেছনে যান';
+      }
+    }
+
     const radarEntities: RadarEntity[] = [];
     for (const tl of this.trafficLights) {
       const stopZ = tl.z + 8.5;
@@ -1526,6 +1899,7 @@ export class GameEngine {
       nearestGasAhead,
       aheadHazard,
       aheadTrafficLight,
+      rearHazard,
       weather: this.weather,
       atmosphereMode: this.atmosphereMode,
       graphicsQuality: this.graphicsQuality,
@@ -1816,8 +2190,11 @@ export class GameEngine {
     this.cngRig.bodyGroup.rotation.z = this.playerRoll;
     this.cngRig.bodyGroup.position.y = Math.sin(performance.now() * 0.04) * 0.015;
 
-    this.handlebarAngle = THREE.MathUtils.damp(this.handlebarAngle, -steerInput * 0.42, 12, dt);
+    this.handlebarAngle = THREE.MathUtils.damp(this.handlebarAngle, -steerInput * 0.18, 12, dt);
     this.cockpitRig.handlebarPivot.rotation.y = this.handlebarAngle;
+    if (this.cameraMode === 'driver') {
+      this.cockpitRig.updateMeter(this.playerSpeed * 2.5, this.gas, boosting);
+    }
 
     this.ornamentPhase += dt * (4.5 + this.playerSpeed * 0.22);
     const targetOrnZ = -steerInput * 0.28 + Math.sin(this.ornamentPhase) * (0.08 + (boosting ? 0.09 : 0));
@@ -1930,6 +2307,7 @@ export class GameEngine {
           this.playerSpeed = Math.max(8, this.playerSpeed * 0.72);
           this.playerX = this.playerX >= 0 ? 1.28 : -1.28;
           this.sound.playCrash(false);
+          this.triggerCrowdReaction(this.playerX, 0, 'violation', 0);
           this.callbacks.onToast({
             text: 'ডিভাইডারে ঘষা! জাতীয় ক্ষতি +৳২০০',
             tone: 'danger',
@@ -1962,7 +2340,7 @@ export class GameEngine {
       wp.wavePhase += dt * 10;
       wp.rig.group.position.z = wp.z;
       wp.pad.position.z = wp.z;
-      wp.rig.rightArm.rotation.z = -2.2 + Math.sin(wp.wavePhase) * 0.45;
+      wp.rig.applyPose('wave', wp.wavePhase);
       wp.rig.alertBadge.rotation.y += dt * 3;
 
       const nearSide = Math.abs(wp.x - this.playerX) < 3.4 && Math.abs(wp.z) < 5.0;
@@ -2141,6 +2519,7 @@ export class GameEngine {
         this.vibrate([45, 25, 50]);
         this.callbacks.onCrashJuice?.('minor');
         this.sound.playRedLightPenalty();
+        this.triggerCrowdReaction(this.playerX, 0, 'violation', 1);
         this.callbacks.onToast({
           text:
             fine > 0
@@ -2416,6 +2795,7 @@ export class GameEngine {
           this.sound.playCrash(false);
           this.vibrate([45, 25, 50]);
           this.callbacks.onCrashJuice?.('minor');
+          this.triggerCrowdReaction(t.x, t.z, 'crash', 1);
           this.callbacks.onToast({
             text: `ধাক্কা! জাতীয় ক্ষতি +৳${toBn(dmgMoney)}!`,
             tone: 'danger',
@@ -2434,59 +2814,127 @@ export class GameEngine {
       }
     }
 
-    // Spawn Pedestrians
+    // Spawn Pedestrians (maintain busy Chattogram street crowd)
     this.pedSpawnTimer -= dt;
     if (this.pedSpawnTimer <= 0) {
-      this.pedSpawnTimer = Math.max(0.65, (1.65 - this.wanted * 0.16) / loopMult);
+      this.pedSpawnTimer = Math.max(0.45, (1.2 - this.wanted * 0.12) / loopMult);
       this.spawnPedestrian();
     }
 
-    // Update Pedestrians & Chasing
+    // Enforce strict max 25 detailed visible pedestrians (rest simple LOD)
+    this.lodScratch.length = 0;
+    for (let i = 0; i < this.pedestrians.length; i++) {
+      const p = this.pedestrians[i];
+      if (p.z < 14 && p.z > -135) {
+        const dx = p.x - this.playerX;
+        this.lodScratch.push({ rig: p.rig, distSq: dx * dx + p.z * p.z });
+      } else {
+        p.rig.setDetailed(false);
+      }
+    }
+    for (let i = 0; i < this.waitingPassengers.length; i++) {
+      const wp = this.waitingPassengers[i];
+      if (wp.z < 14 && wp.z > -135) {
+        const dx = wp.x - this.playerX;
+        this.lodScratch.push({ rig: wp.rig, distSq: dx * dx + wp.z * wp.z });
+      } else {
+        wp.rig.setDetailed(false);
+      }
+    }
+    this.lodScratch.sort((a, b) => a.distSq - b.distSq);
+    for (let i = 0; i < this.lodScratch.length; i++) {
+      this.lodScratch[i].rig.setDetailed(i < MAX_DETAILED_PEDESTRIANS);
+    }
+
+    // Update Pedestrians, Animations, Jump-Back, Fall+Dust & Chasing
     for (let i = this.pedestrians.length - 1; i >= 0; i--) {
       const p = this.pedestrians[i];
       if (p.hitCooldown > 0) p.hitCooldown -= dt;
+      if (p.reactTimer > 0) p.reactTimer -= dt;
+      if (p.speechTimer > 0) {
+        p.speechTimer -= dt;
+        if (p.speechTimer <= 0) {
+          p.rig.hideSpeech();
+        }
+      }
 
-      if (p.isChasing) {
+      if (p.propGroup) {
+        // Move shared bench prop only once when anchored by first sitter
+        p.propGroup.position.z += distStep;
+      }
+
+      let activePose: PedestrianPose = p.basePose;
+      let poseAux = 0;
+
+      if (p.fallTimer > 0) {
+        p.fallTimer -= dt;
+        p.z += distStep;
+        activePose = 'fall';
+        poseAux = 1 - Math.max(0, p.fallTimer) / 0.9;
+      } else if (p.jumpBackTimer > 0) {
+        p.jumpBackTimer -= dt;
+        p.z += distStep;
+        p.x = THREE.MathUtils.clamp(p.x + p.walkDir * 5.2 * dt, -10.2, 10.2);
+        p.rig.group.rotation.y = p.reactYaw;
+        activePose = 'jump_back';
+        poseAux = 1 - Math.max(0, p.jumpBackTimer) / 0.6;
+      } else if (p.isChasing) {
         const dx = this.playerX - p.x;
         const dz = 0 - p.z;
         const dist = Math.hypot(dx, dz) || 1;
         const chaseSpeed = 15.5 + this.wanted * 1.4 + (this.loopCount - 1) * 1.5;
         p.x += (dx / dist) * Math.min(9.5, chaseSpeed * 0.55) * dt;
         p.z += (this.playerSpeed - chaseSpeed * 0.9) * dt + (dz / dist) * 4.5 * dt;
-
         p.rig.group.rotation.y = Math.atan2(dx, dz);
-        p.animPhase += dt * 16;
+        p.animPhase += dt * 15;
+        activePose = 'run';
+      } else if (p.basePose === 'sit_tea_stall' || p.basePose === 'argue' || p.basePose === 'wave') {
+        p.z += distStep;
+        p.animPhase += dt * (p.basePose === 'argue' ? 7.5 : p.basePose === 'wave' ? 6.5 : 3.2);
+        if (p.reactTimer > 0 && p.basePose !== 'sit_tea_stall') {
+          p.rig.group.rotation.y = p.reactYaw;
+          activePose = 'argue';
+        }
       } else if (p.walkDir !== 0) {
         p.z += distStep;
         p.x += p.walkDir * p.walkSpeed * dt;
-        if (p.x > 9.8 || p.x < -9.8) p.walkDir *= -1;
+        if (p.x > 9.4 || p.x < -9.4) p.walkDir *= -1;
         p.rig.group.rotation.y = p.walkDir > 0 ? Math.PI / 2 : -Math.PI / 2;
-        p.animPhase += dt * 8;
+        p.animPhase += dt * (p.basePose === 'cross_unaware' ? 8.5 : 7.0);
+        activePose = p.basePose;
       } else {
         // Sidewalk stroller
         p.z += (this.playerSpeed - p.walkSpeed) * dt;
-        p.rig.group.rotation.y = Math.PI;
-        p.animPhase += dt * 6;
+        p.rig.group.rotation.y = p.reactTimer > 0 ? p.reactYaw : Math.PI;
+        p.animPhase += dt * 6.0;
+        activePose = p.basePose;
       }
 
-      p.rig.group.position.set(p.x, 0, p.z);
+      const groundY = Math.abs(p.x) >= 8.65 ? 0.20 : 0;
+      p.baseY = THREE.MathUtils.damp(p.baseY, groundY, 16, dt);
+      p.rig.group.position.set(p.x, p.baseY, p.z);
+      p.rig.applyPose(activePose, p.animPhase, poseAux);
 
-      const swing = Math.sin(p.animPhase) * (p.isChasing ? 0.75 : 0.45);
-      p.rig.leftLeg.rotation.x = swing;
-      p.rig.rightLeg.rotation.x = -swing;
-      p.rig.leftArm.rotation.x = p.isChasing ? -2.2 + swing * 0.6 : -swing;
-      p.rig.rightArm.rotation.x = p.isChasing ? -2.2 - swing * 0.6 : swing;
       if (p.isChasing) {
         p.rig.alertBadge.rotation.y += dt * 4;
       }
 
-      const hitPed = Math.abs(p.x - this.playerX) < 1.15 && Math.abs(p.z) < 1.65;
+      const hitPed =
+        p.canCollide &&
+        Math.abs(p.x - this.playerX) < 1.15 &&
+        Math.abs(p.z) < 1.65;
       if (hitPed && p.hitCooldown <= 0) {
         if (!p.isChasing) {
+          p.x = THREE.MathUtils.clamp(p.x + (p.x >= this.playerX ? 1.1 : -1.1), -9.6, 9.6);
+          p.z += 0.35;
+          p.fallTimer = 0.9;
           p.isChasing = true;
           p.rig.alertBadge.visible = true;
-          p.hitCooldown = 0.9;
-          p.z += 1.8;
+          p.hitCooldown = 1.35;
+          p.rig.showSpeech('crash');
+          p.speechTimer = 2.8;
+          this.spawnDustBurst(p.x, 0.22, p.z, 9);
+
           this.nationalDamage += 800;
           this.wanted = Math.min(5, this.wanted + 1);
           this.shakeTimer = 0.22;
@@ -2494,12 +2942,7 @@ export class GameEngine {
           this.callbacks.onCrashJuice?.('minor');
           this.sound.playCrash(false);
 
-          for (const other of this.pedestrians) {
-            if (!other.isChasing && Math.abs(other.z - p.z) < 12 && Math.abs(other.x - p.x) < 7) {
-              other.isChasing = true;
-              other.rig.alertBadge.visible = true;
-            }
-          }
+          this.triggerCrowdReaction(p.x, p.z, 'crash', 2);
 
           this.callbacks.onToast({
             text: 'পথচারীকে ধাক্কা! জাতীয় ক্ষতি +৳৮০০ — তারা তাড়া করছে!',
@@ -2527,9 +2970,12 @@ export class GameEngine {
 
       if (p.z > 20 || p.z < -175) {
         this.scene.remove(p.rig.group);
+        if (p.propGroup) this.scene.remove(p.propGroup);
         this.pedestrians.splice(i, 1);
       }
     }
+
+    this.updateDustPuffs(dt, distStep);
 
     // Camera update (External chase cam vs Driver 1st-person cockpit cam)
     this.hornZoomPulse = THREE.MathUtils.damp(this.hornZoomPulse, 0, 11, dt);
@@ -2559,7 +3005,7 @@ export class GameEngine {
       } else {
         _camLookAt.set(
           eyeX - Math.sin(this.lookYaw) * 14,
-          eyeY - 0.16 + Math.sin(this.lookPitch) * 10,
+          eyeY - 0.85 + Math.sin(this.lookPitch) * 10,
           eyeZ - Math.cos(this.lookYaw) * 14
         );
       }
@@ -2638,6 +3084,46 @@ export class GameEngine {
     this.frameId = window.setTimeout(poll, 5);
   }
 
+  private renderDriverMirrors(): void {
+    if (!this.leftMirrorRT || !this.rightMirrorRT) return;
+    const active =
+      this.cameraMode === 'driver' &&
+      (this.phase === 'playing' || this.phase === 'paused') &&
+      !this.input.lookBack;
+    if (!active) return;
+
+    this.mirrorFrameCounter++;
+    const lowCost = this.isSoftwareGl || this.graphicsQuality === 'low';
+    const renderLeft = !lowCost || this.mirrorFrameCounter % 2 === 0;
+    const renderRight = !lowCost || this.mirrorFrameCounter % 2 === 1;
+
+    const prevShadowAuto = this.renderer.shadowMap.autoUpdate;
+    this.renderer.shadowMap.autoUpdate = false;
+    this.cockpitRig.group.visible = false;
+
+    if (renderLeft) {
+      this.leftMirrorCam.position.set(this.playerX - 0.62, 1.44, -0.35);
+      _camLookAt.set(this.playerX - 2.35, 1.15, 32);
+      this.leftMirrorCam.lookAt(_camLookAt);
+      this.renderer.setRenderTarget(this.leftMirrorRT);
+      this.renderer.clear();
+      this.renderer.render(this.scene, this.leftMirrorCam);
+    }
+
+    if (renderRight) {
+      this.rightMirrorCam.position.set(this.playerX + 0.62, 1.44, -0.35);
+      _camLookAt.set(this.playerX + 2.35, 1.15, 32);
+      this.rightMirrorCam.lookAt(_camLookAt);
+      this.renderer.setRenderTarget(this.rightMirrorRT);
+      this.renderer.clear();
+      this.renderer.render(this.scene, this.rightMirrorCam);
+    }
+
+    this.renderer.setRenderTarget(null);
+    this.cockpitRig.group.visible = true;
+    this.renderer.shadowMap.autoUpdate = prevShadowAuto;
+  }
+
   private tick = (): void => {
     if (this.disposed) return;
 
@@ -2651,6 +3137,7 @@ export class GameEngine {
       this.stepShowcase(dt);
     }
 
+    this.renderDriverMirrors();
     this.renderer.render(this.scene, this.camera);
 
     if (this.isSoftwareGl) {
@@ -2674,7 +3161,10 @@ export class GameEngine {
 
     this.sound.dispose();
     this.streetDressing?.dispose();
+    this.leftMirrorRT?.dispose();
+    this.rightMirrorRT?.dispose();
     disposeVehicleAssetPool();
+    disposePedestrianAssetPool();
 
     this.roadBumpPlain?.dispose();
     this.roadBumpZebra?.dispose();

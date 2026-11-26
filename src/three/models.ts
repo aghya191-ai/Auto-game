@@ -24,6 +24,18 @@ export {
   type TrafficModelRig,
 } from './vehicleModels';
 
+export {
+  createPedestrianModel,
+  createTeaStallBench,
+  disposePedestrianAssetPool,
+  pickRandomPedestrianStyle,
+  type PedestrianCreateOptions,
+  type PedestrianPose,
+  type PedestrianRig,
+  type PedestrianStyle,
+  type SpeechCategory,
+} from './pedestrianModels';
+
 let sharedLightGlowTex: THREE.CanvasTexture | null = null;
 function getLightGlowTex(): THREE.CanvasTexture {
   if (!sharedLightGlowTex) {
@@ -36,7 +48,20 @@ export interface CockpitRig {
   group: THREE.Group;
   handlebarPivot: THREE.Group;
   ornamentPivot: THREE.Group;
+  leftMirrorMat: THREE.MeshBasicMaterial;
+  rightMirrorMat: THREE.MeshBasicMaterial;
   updateAppearance: (colorHex: string) => void;
+  updateMeter: (speedKmh: number, gas: number, boosting: boolean) => void;
+}
+
+function createFlippedCircleGeo(radius: number, segments = 24): THREE.CircleGeometry {
+  const geo = new THREE.CircleGeometry(radius, segments);
+  const uv = geo.getAttribute('uv') as THREE.BufferAttribute;
+  for (let i = 0; i < uv.count; i++) {
+    uv.setX(i, 1 - uv.getX(i));
+  }
+  uv.needsUpdate = true;
+  return geo;
 }
 
 export function createCockpitModel(colorHex: string): CockpitRig {
@@ -45,8 +70,13 @@ export function createCockpitModel(colorHex: string): CockpitRig {
 
   const paintMat = new THREE.MeshStandardMaterial({
     color: colorHex,
-    roughness: 0.34,
-    metalness: 0.25,
+    roughness: 0.36,
+    metalness: 0.22,
+  });
+  const frameRustMat = new THREE.MeshStandardMaterial({
+    color: '#7c3f23',
+    roughness: 0.8,
+    metalness: 0.12,
   });
   const roofMat = new THREE.MeshStandardMaterial({
     color: '#1e293b',
@@ -57,195 +87,220 @@ export function createCockpitModel(colorHex: string): CockpitRig {
   const darkMetalMat = new THREE.MeshStandardMaterial({
     color: '#18181b',
     roughness: 0.42,
-    metalness: 0.7,
+    metalness: 0.72,
   });
   const chromeMat = new THREE.MeshStandardMaterial({
     color: '#e4e4e7',
     roughness: 0.2,
     metalness: 0.9,
   });
-  const cageMat = new THREE.MeshStandardMaterial({
-    color: '#d4d4d8',
-    roughness: 0.24,
-    metalness: 0.85,
-  });
   const gripMat = new THREE.MeshStandardMaterial({
     color: '#27272a',
     roughness: 0.9,
   });
   const skinMat = new THREE.MeshStandardMaterial({
-    color: '#b45309',
-    roughness: 0.72,
+    color: '#9a4b16',
+    roughness: 0.74,
   });
   const sleeveMat = new THREE.MeshStandardMaterial({
     color: '#0f766e',
     roughness: 0.85,
   });
 
-  // Front hood & mudguard visible over windshield cowl
-  const noseCowl = new THREE.Mesh(new THREE.BoxGeometry(1.22, 0.38, 0.68), paintMat);
-  noseCowl.position.set(0, 0.88, -1.04);
-  const frontFender = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.14, 0.56), paintMat);
-  frontFender.position.set(0, 0.64, -1.28);
-  group.add(noseCowl, frontFender);
+  // Low front hood & subtle lower corner body rails (leaving upper 75% road & sky completely unobstructed!)
+  const noseCowl = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.24, 0.58), paintMat);
+  noseCowl.position.set(0, 0.82, -1.24);
+  group.add(noseCowl);
 
-  // Dashboard inner ledge
-  const dashDeck = new THREE.Mesh(new THREE.BoxGeometry(1.16, 0.14, 0.32), darkMetalMat);
-  dashDeck.position.set(0, 1.06, -0.78);
-  group.add(dashDeck);
+  // Lower-left & lower-right cockpit cowl posts framing bottom edges like the reference view
+  [-1, 1].forEach((side) => {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.26, 0.36), frameRustMat);
+    post.position.set(side * 0.215, 1.03, -0.90);
+    post.rotation.z = -side * 0.14;
+    const outerWing = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.26, 0.45), paintMat);
+    outerWing.position.set(side * 0.38, 0.94, -0.92);
+    group.add(post, outerWing);
+  });
 
-  // Windshield A-pillars & Top Header Frame
-  const pillarL = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.035, 0.94, 8), darkMetalMat);
-  pillarL.position.set(-0.62, 1.48, -0.82);
-  pillarL.rotation.x = 0.2;
-  const pillarR = pillarL.clone();
-  pillarR.position.x = 0.62;
-
-  const topHeader = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.08, 0.12), darkMetalMat);
-  topHeader.position.set(0, 1.92, -0.74);
-
-  const lowerRim = new THREE.Mesh(new THREE.BoxGeometry(1.26, 0.08, 0.08), paintMat);
-  lowerRim.position.set(0, 1.12, -0.88);
-  group.add(pillarL, pillarR, topHeader, lowerRim);
-
-  // Overhead Canvas Roof Canopy (lines visible above & behind when looking up/back)
-  const roofPanel = new THREE.Mesh(new THREE.BoxGeometry(1.52, 0.08, 2.05), roofMat);
-  roofPanel.position.set(0, 1.98, 0.24);
-  group.add(roofPanel);
-
-  // Side support posts & partial Wire-Cage Grilles (খাঁচা-জালি) on left/right sides
-  const buildCockpitSideCage = (sideX: number) => {
-    const cage = new THREE.Group();
-    cage.position.set(sideX, 1.42, 0.15);
-
-    const midPost = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.95, 8), darkMetalMat);
-    midPost.position.set(0, 0.08, -0.2);
-    const rearPost = midPost.clone();
-    rearPost.position.z = 0.95;
-
-    const topRail = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.045, 1.25), cageMat);
-    topRail.position.set(0, 0.44, 0.36);
-    const midRail = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 1.25), cageMat);
-    midRail.position.set(0, 0.14, 0.36);
-    const botRail = midRail.clone();
-    botRail.position.y = -0.18;
-
-    const vBar1 = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.62, 6), cageMat);
-    vBar1.position.set(0, 0.13, 0.14);
-    const vBar2 = vBar1.clone();
-    vBar2.position.z = 0.54;
-
-    const diag = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.92, 6), cageMat);
-    diag.rotation.x = 1.05;
-    diag.position.set(0, 0.13, 0.36);
-
-    cage.add(midPost, rearPost, topRail, midRail, botRail, vBar1, vBar2, diag);
-    group.add(cage);
-  };
-  buildCockpitSideCage(-0.76);
-  buildCockpitSideCage(0.76);
-
-  // Rear Cabin Frame (visible when holding V to look back)
+  // Rear Cabin Frame & Seat (positioned behind camera so forward view is clear, visible on Look Back)
+  const rearRoof = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.08, 0.95), roofMat);
+  rearRoof.position.set(0, 1.94, 0.88);
   const rearUpper = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.25, 0.08), roofMat);
-  rearUpper.position.set(0, 1.82, 1.22);
+  rearUpper.position.set(0, 1.82, 1.32);
   const rearBench = new THREE.Mesh(
     new THREE.BoxGeometry(1.3, 0.35, 0.48),
     new THREE.MeshStandardMaterial({ color: '#7c2d12', roughness: 0.8 })
   );
-  rearBench.position.set(0, 0.72, 0.88);
-  group.add(rearUpper, rearBench);
+  rearBench.position.set(0, 0.72, 0.98);
+  group.add(rearRoof, rearUpper, rearBench);
 
-  // Corner Side Mirror (left windshield edge)
-  const mirrorArm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.025, 0.025), darkMetalMat);
-  mirrorArm.position.set(-0.68, 1.44, -0.82);
-  const mirrorCase = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.11, 0.04), darkMetalMat);
-  mirrorCase.position.set(-0.78, 1.46, -0.8);
-  mirrorCase.rotation.y = 0.35;
-  const mirrorGlass = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.15, 0.085),
-    new THREE.MeshStandardMaterial({ color: '#bae6fd', roughness: 0.08, metalness: 0.9 })
-  );
-  mirrorGlass.position.set(-0.78, 1.46, -0.778);
-  mirrorGlass.rotation.y = 0.35;
-  group.add(mirrorArm, mirrorCase, mirrorGlass);
-
-  // Hanging Windshield Ornament (তাবিজ / ঝালর)
+  // Dummy ornamentPivot kept for engine animation compatibility (no windshield obstruction)
   const ornamentPivot = new THREE.Group();
-  ornamentPivot.position.set(0, 1.88, -0.74);
-
-  const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.16, 6), gripMat);
-  cord.position.y = -0.08;
-  const charmRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.026, 0.008, 6, 12),
-    new THREE.MeshStandardMaterial({ color: '#facc15', roughness: 0.25, metalness: 0.85 })
-  );
-  charmRing.position.y = -0.17;
-  const tasselBody = new THREE.Mesh(
-    new THREE.ConeGeometry(0.032, 0.1, 8),
-    new THREE.MeshStandardMaterial({ color: '#dc2626', roughness: 0.65 })
-  );
-  tasselBody.position.y = -0.24;
-  const charmBead = new THREE.Mesh(
-    new THREE.SphereGeometry(0.02, 8, 8),
-    new THREE.MeshStandardMaterial({ color: '#facc15', roughness: 0.2, metalness: 0.8 })
-  );
-  charmBead.position.y = -0.29;
-  ornamentPivot.add(cord, charmRing, tasselBody, charmBead);
+  ornamentPivot.visible = false;
   group.add(ornamentPivot);
 
-  // Motorcycle-style CNG Steering Handlebar + Driver Hands
+  // CNG Steering Handlebar Assembly positioned cleanly in lower-center of Driver View
   const handlebarPivot = new THREE.Group();
-  handlebarPivot.position.set(0, 1.12, -0.62);
-  handlebarPivot.rotation.x = 0.22;
+  handlebarPivot.position.set(0, 1.11, -0.96);
+  handlebarPivot.rotation.x = 0.18;
 
-  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.22, 10), darkMetalMat);
-  stem.position.y = -0.08;
-  const clamp = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.08), chromeMat);
-  clamp.position.y = 0.02;
+  // Colorful striped tape rings down the steering column (Bangladeshi street style)
+  const bandColors = ['#e2e8f0', '#ef4444', '#facc15', '#22c55e', '#3b82f6', '#ec4899', '#e2e8f0'];
+  const bandGeo = new THREE.CylinderGeometry(0.020, 0.021, 0.032, 10);
+  bandColors.forEach((hex, idx) => {
+    const band = new THREE.Mesh(
+      bandGeo,
+      new THREE.MeshStandardMaterial({ color: hex, roughness: 0.5 })
+    );
+    band.position.y = -0.02 - idx * 0.032;
+    handlebarPivot.add(band);
+  });
 
-  const leftBar = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.34, 8), chromeMat);
-  leftBar.rotation.z = Math.PI / 2 - 0.12;
-  leftBar.position.set(-0.18, 0.04, 0.04);
+  // Center clamp + live 3D Speedometer / Gas Gauge Pod
+  const clamp = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.036, 0.055), chromeMat);
+  clamp.position.y = 0.008;
+  handlebarPivot.add(clamp);
 
-  const rightBar = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.34, 8), chromeMat);
-  rightBar.rotation.z = -Math.PI / 2 + 0.12;
-  rightBar.position.set(0.18, 0.04, 0.04);
+  const meterHousing = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.038, 0.042, 0.042, 14),
+    darkMetalMat
+  );
+  meterHousing.rotation.x = Math.PI / 2 - 0.32;
+  meterHousing.position.set(0, 0.048, 0.01);
+  handlebarPivot.add(meterHousing);
 
-  const leftGrip = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.15, 10), gripMat);
-  leftGrip.rotation.z = Math.PI / 2 - 0.12;
-  leftGrip.position.set(-0.32, 0.06, 0.06);
+  const meterCanvas = document.createElement('canvas');
+  meterCanvas.width = 128;
+  meterCanvas.height = 128;
+  const meterCtx = meterCanvas.getContext('2d')!;
+  const meterTex = new THREE.CanvasTexture(meterCanvas);
+  meterTex.colorSpace = THREE.SRGBColorSpace;
+  const meterFace = new THREE.Mesh(
+    new THREE.CircleGeometry(0.033, 16),
+    new THREE.MeshBasicMaterial({ map: meterTex })
+  );
+  meterFace.position.set(0, 0.055, 0.032);
+  meterFace.rotation.x = -0.32;
+  handlebarPivot.add(meterFace);
 
-  const rightGrip = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.15, 10), gripMat);
-  rightGrip.rotation.z = -Math.PI / 2 + 0.12;
-  rightGrip.position.set(0.32, 0.06, 0.06);
+  let lastMeterSpeed = -1;
+  let lastMeterGas = -1;
+  let lastMeterBoost = false;
+  const updateMeter = (speedKmh: number, gas: number, boosting: boolean) => {
+    const sRounded = Math.round(speedKmh);
+    const gRounded = Math.round(gas);
+    if (sRounded === lastMeterSpeed && gRounded === lastMeterGas && boosting === lastMeterBoost) return;
+    lastMeterSpeed = sRounded;
+    lastMeterGas = gRounded;
+    lastMeterBoost = boosting;
 
-  // Low-poly Driver Hands & Forearms gripping handlebar
+    meterCtx.fillStyle = '#09090b';
+    meterCtx.beginPath();
+    meterCtx.arc(64, 64, 62, 0, Math.PI * 2);
+    meterCtx.fill();
+
+    // Outer green/amber ring
+    meterCtx.strokeStyle = boosting ? '#f97316' : '#22c55e';
+    meterCtx.lineWidth = 8;
+    meterCtx.beginPath();
+    meterCtx.arc(64, 64, 54, Math.PI * 0.75, Math.PI * 0.75 + Math.PI * 1.5 * Math.min(1, sRounded / 120));
+    meterCtx.stroke();
+
+    // Digital speed readout
+    meterCtx.fillStyle = boosting ? '#fde047' : '#4ade80';
+    meterCtx.font = '900 42px sans-serif';
+    meterCtx.textAlign = 'center';
+    meterCtx.textBaseline = 'middle';
+    meterCtx.fillText(String(sRounded), 64, 56);
+
+    // Mini gas bar at bottom of dial
+    meterCtx.fillStyle = '#27272a';
+    meterCtx.fillRect(30, 86, 68, 12);
+    meterCtx.fillStyle = gRounded < 25 ? '#ef4444' : '#facc15';
+    meterCtx.fillRect(32, 88, Math.max(4, Math.round(64 * (gRounded / 100))), 8);
+
+    meterTex.needsUpdate = true;
+  };
+  updateMeter(0, 100, false);
+
+  // Horizontal Handlebar + Grips
+  const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.34, 8), chromeMat);
+  bar.rotation.z = Math.PI / 2;
+  bar.position.set(0, 0.015, 0.015);
+  handlebarPivot.add(bar);
+
+  const gripGeo = new THREE.CylinderGeometry(0.016, 0.016, 0.085, 8);
+  const leftGrip = new THREE.Mesh(gripGeo, gripMat);
+  leftGrip.rotation.z = Math.PI / 2;
+  leftGrip.position.set(-0.155, 0.015, 0.02);
+  const rightGrip = leftGrip.clone();
+  rightGrip.position.x = 0.155;
+  handlebarPivot.add(leftGrip, rightGrip);
+
+  // Decorative Yellow/Orange/Red Bead Garland (মালা) draped under the handlebar
+  const beadGeo = new THREE.BoxGeometry(0.014, 0.014, 0.014);
+  const beadColors = ['#facc15', '#fb923c', '#ef4444', '#fef08a'];
+  const beadMats = beadColors.map(
+    (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.45 })
+  );
+  for (let i = -6; i <= 6; i++) {
+    const t = i / 6;
+    const bx = t * 0.115;
+    const by = -0.036 + t * t * 0.036;
+    const bead = new THREE.Mesh(beadGeo, beadMats[Math.abs(i) % beadMats.length]);
+    bead.position.set(bx, by, 0.026);
+    bead.rotation.z = Math.PI * 0.25;
+    handlebarPivot.add(bead);
+  }
+
+  // Left & Right Round Looking Glasses (Side Rear-View Mirrors with live WebGLRenderTarget glass!)
+  const leftMirrorMat = new THREE.MeshBasicMaterial({ color: '#bae6fd' });
+  const rightMirrorMat = new THREE.MeshBasicMaterial({ color: '#bae6fd' });
+  const mirrorGlassGeo = createFlippedCircleGeo(0.046, 22);
+  const mirrorBackGeo = new THREE.CylinderGeometry(0.052, 0.048, 0.018, 20);
+  const stalkGeo = new THREE.CylinderGeometry(0.0055, 0.0065, 0.135, 6);
+
+  const buildLookingGlass = (side: -1 | 1, glassMat: THREE.MeshBasicMaterial) => {
+    const stalk = new THREE.Mesh(stalkGeo, darkMetalMat);
+    stalk.position.set(side * 0.112, 0.082, 0.015);
+    stalk.rotation.z = -side * 0.24;
+
+    const head = new THREE.Group();
+    head.position.set(side * 0.132, 0.155, 0.012);
+    head.rotation.y = -side * 0.18;
+    head.rotation.x = -0.10;
+
+    const rim = new THREE.Mesh(mirrorBackGeo, darkMetalMat);
+    rim.rotation.x = Math.PI / 2;
+
+    const glass = new THREE.Mesh(mirrorGlassGeo, glassMat);
+    glass.position.z = 0.011;
+
+    head.add(rim, glass);
+    handlebarPivot.add(stalk, head);
+  };
+
+  buildLookingGlass(-1, leftMirrorMat);
+  buildLookingGlass(1, rightMirrorMat);
+
+  // Driver Forearms & Hands gripping the handlebar
   const makeArmAndHand = (side: -1 | 1) => {
     const armGroup = new THREE.Group();
-    const hand = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.065, 0.09), skinMat);
-    hand.position.set(side * 0.32, 0.075, 0.06);
-    const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.046, 0.32, 8), skinMat);
-    forearm.position.set(side * 0.34, -0.02, 0.22);
+    const hand = new THREE.Mesh(new THREE.BoxGeometry(0.042, 0.034, 0.048), skinMat);
+    hand.position.set(side * 0.155, 0.022, 0.022);
+    const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.020, 0.024, 0.19, 8), skinMat);
+    forearm.position.set(side * 0.175, -0.025, 0.11);
     forearm.rotation.x = Math.PI / 2 - 0.35;
-    forearm.rotation.z = side * 0.15;
-    const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.054, 0.2, 8), sleeveMat);
-    sleeve.position.set(side * 0.36, -0.08, 0.38);
+    forearm.rotation.z = side * 0.18;
+    const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.03, 0.14, 8), sleeveMat);
+    sleeve.position.set(side * 0.195, -0.06, 0.21);
     sleeve.rotation.x = Math.PI / 2 - 0.35;
-    sleeve.rotation.z = side * 0.15;
+    sleeve.rotation.z = side * 0.18;
     armGroup.add(hand, forearm, sleeve);
     return armGroup;
   };
 
-  handlebarPivot.add(
-    stem,
-    clamp,
-    leftBar,
-    rightBar,
-    leftGrip,
-    rightGrip,
-    makeArmAndHand(-1),
-    makeArmAndHand(1)
-  );
+  handlebarPivot.add(makeArmAndHand(-1), makeArmAndHand(1));
   group.add(handlebarPivot);
 
   const updateAppearance = (newColorHex: string) => {
@@ -256,63 +311,16 @@ export function createCockpitModel(colorHex: string): CockpitRig {
     group,
     handlebarPivot,
     ornamentPivot,
+    leftMirrorMat,
+    rightMirrorMat,
     updateAppearance,
+    updateMeter,
   };
 }
 
 
 
-export interface PedestrianRig {
-  group: THREE.Group;
-  leftLeg: THREE.Mesh;
-  rightLeg: THREE.Mesh;
-  leftArm: THREE.Mesh;
-  rightArm: THREE.Mesh;
-  alertBadge: THREE.Mesh;
-}
 
-export function createPedestrianModel(shirtHex: string, isWaitingPassenger = false): PedestrianRig {
-  const group = new THREE.Group();
-
-  const skinMat = new THREE.MeshStandardMaterial({ color: '#b45309', roughness: 0.75 });
-  const shirtMat = new THREE.MeshStandardMaterial({ color: shirtHex, roughness: 0.8 });
-  const pantsMat = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.85 });
-  const hairMat = new THREE.MeshStandardMaterial({ color: '#18181b', roughness: 0.9 });
-
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.62, 0.26), shirtMat);
-  torso.position.y = 1.05;
-  torso.castShadow = true;
-
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 10), skinMat);
-  head.position.y = 1.54;
-  head.castShadow = true;
-
-  const hair = new THREE.Mesh(
-    new THREE.SphereGeometry(0.19, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
-    hairMat
-  );
-  hair.position.y = 1.56;
-
-  const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.7, 0.18), pantsMat);
-  leftLeg.position.set(-0.12, 0.38, 0);
-  const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.7, 0.18), pantsMat);
-  rightLeg.position.set(0.12, 0.38, 0);
-
-  const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.54, 0.15), shirtMat);
-  leftArm.position.set(-0.32, 1.05, 0);
-  const rightArm = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.54, 0.15), shirtMat);
-  rightArm.position.set(0.32, 1.05, 0);
-
-  const alertBadge = new THREE.Mesh(
-    new THREE.OctahedronGeometry(0.22, 0),
-    new THREE.MeshBasicMaterial({ color: isWaitingPassenger ? '#10b981' : '#ef4444' })
-  );
-  alertBadge.position.y = 2.1;
-  alertBadge.visible = isWaitingPassenger;
-
-  group.add(torso, head, hair, leftLeg, rightLeg, leftArm, rightArm, alertBadge);
-  return { group, leftLeg, rightLeg, leftArm, rightArm, alertBadge };
-}
 
 export function createRoadDivider(
   length: number,
