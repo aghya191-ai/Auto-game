@@ -216,8 +216,12 @@ export function HUD({
                   </span>
                 </div>
               ) : hud.passengerNearPickup ? (
-                <div className="sticker-chip rounded-lg bg-cyan-300/95 px-2 py-0.5 text-[10px] font-black text-stone-950">
-                  যাত্রী তুলুন
+                <div className="sticker-chip flex items-center gap-1.5 rounded-lg bg-cyan-300/95 px-2 py-0.5 text-[10px] font-black text-stone-950 tabular-nums">
+                  <span>
+                    {hud.pickupProgress > 0
+                      ? `যাত্রী উঠছে · ${toBn(Math.round(hud.pickupProgress * 100))}%`
+                      : 'দাগে থামুন (১.৫ সে)'}
+                  </span>
                 </div>
               ) : null
             ) : (
@@ -325,8 +329,20 @@ export function HUD({
                     </span>
                   </div>
                 ) : hud.passengerNearPickup ? (
-                  <div className="sticker-chip rounded-lg bg-cyan-300 px-2 py-0.5 text-[10px] font-black text-stone-950">
-                    যাত্রী হাত দেখাচ্ছে — থেমে তুলুন!
+                  <div className="sticker-chip flex flex-col gap-0.5 rounded-lg bg-cyan-300 px-2 py-0.5 text-[10px] font-black text-stone-950 tabular-nums">
+                    <span>
+                      {hud.pickupProgress > 0
+                        ? `যাত্রী উঠছে... ${toBn(Math.round(hud.pickupProgress * 100))}%`
+                        : 'যাত্রী হাত দেখাচ্ছে — রিংয়ে ১.৫ সে থামুন!'}
+                    </span>
+                    {hud.pickupProgress > 0 && (
+                      <div className="h-1.5 w-full overflow-hidden rounded-full border border-stone-950 bg-white/80">
+                        <div
+                          className="h-full bg-emerald-500 transition-all duration-75"
+                          style={{ width: `${Math.round(hud.pickupProgress * 100)}%` }}
+                        />
+                      </div>
+                    )}
                   </div>
                 ) : null}
               </>

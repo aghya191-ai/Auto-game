@@ -366,6 +366,33 @@
   animation: toastPop 200ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
+@keyframes dhopasBurst {
+  0% {
+    transform: scale(0.2) rotate(-18deg);
+    opacity: 0;
+  }
+  28% {
+    transform: scale(1.24) rotate(-5deg);
+    opacity: 1;
+  }
+  48% {
+    transform: scale(0.96) rotate(-9deg);
+    opacity: 1;
+  }
+  80% {
+    transform: scale(1.04) rotate(-7deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.18) rotate(-4deg);
+    opacity: 0;
+  }
+}
+
+.animate-dhopas-burst {
+  animation: dhopasBurst 1400ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-ticker,
   .animate-sunburst,
@@ -373,12 +400,13 @@
   .animate-combo-burst,
   .animate-crowd-shake,
   .animate-float-wobble,
-    .animate-screen-shake,
+  .animate-screen-shake,
   .animate-crash-flash,
   .animate-combo-flash,
   .animate-stamp-slam,
   .animate-speed-lines,
-  .animate-toast-pop {
+  .animate-toast-pop,
+  .animate-dhopas-burst {
     animation: none !important;
   }
 }

@@ -61,6 +61,7 @@ const INITIAL_HUD: HudSnapshot = {
   passengerFare: 0,
   passengerDistLeft: 0,
   passengerNearPickup: false,
+  pickupProgress: 0,
   activeEvent: null,
   cameraMode: 'external',
   steerDir: 0,
@@ -108,6 +109,8 @@ export default function App() {
   const [crashShakeActive, setCrashShakeActive] = useState(false);
   const [crashFlashKey, setCrashFlashKey] = useState(0);
   const [crashFlashActive, setCrashFlashActive] = useState(false);
+  const [crashBurstText, setCrashBurstText] = useState<string | null>(null);
+  const [crashBurstKey, setCrashBurstKey] = useState(0);
   const [comboFlashKey, setComboFlashKey] = useState(0);
   const [comboFlashActive, setComboFlashActive] = useState(false);
 
@@ -115,6 +118,7 @@ export default function App() {
   const radioHideTimerRef = useRef<number>(0);
   const shakeResetTimerRef = useRef<number>(0);
   const flashResetTimerRef = useRef<number>(0);
+  const crashBurstTimerRef = useRef<number>(0);
   const comboFlashResetTimerRef = useRef<number>(0);
   const comboTimerRef = useRef<number>(0);
   const toastHideTimerRef = useRef<number>(0);
@@ -390,6 +394,12 @@ export default function App() {
         },
         onToast: (t) => pushToast(t),
         onCrashJuice: () => triggerCrashJuice(),
+        onCrashBurstText: (text) => {
+          setCrashBurstKey((k) => k + 1);
+          setCrashBurstText(text);
+          clearTimeout(crashBurstTimerRef.current);
+          crashBurstTimerRef.current = window.setTimeout(() => setCrashBurstText(null), 1450);
+        },
         onMissionProgress: handleMissionProgress,
         onDriverXpGain: (xp) => {
           setSave((prev) => {
@@ -404,6 +414,8 @@ export default function App() {
         onGameOver: (summary) => {
           clearTimeout(toastHideTimerRef.current);
           clearTimeout(areaBannerTimerRef.current);
+          clearTimeout(crashBurstTimerRef.current);
+          setCrashBurstText(null);
           areaBannerActiveRef.current = false;
           toastQueueRef.current = [];
           activeToastRef.current = null;
@@ -437,6 +449,7 @@ export default function App() {
       clearTimeout(radioHideTimerRef.current);
       clearTimeout(shakeResetTimerRef.current);
       clearTimeout(flashResetTimerRef.current);
+      clearTimeout(crashBurstTimerRef.current);
       clearTimeout(comboFlashResetTimerRef.current);
       clearTimeout(comboTimerRef.current);
       clearTimeout(toastHideTimerRef.current);
@@ -602,6 +615,8 @@ export default function App() {
     setShowMissions(false);
     clearTimeout(toastHideTimerRef.current);
     clearTimeout(areaBannerTimerRef.current);
+    clearTimeout(crashBurstTimerRef.current);
+    setCrashBurstText(null);
     areaBannerActiveRef.current = false;
     toastQueueRef.current = [];
     activeToastRef.current = null;
@@ -615,6 +630,45 @@ export default function App() {
     lastRadioAreaRef.current = startAreaIndex;
     setPhase('playing');
     engineRef.current?.startNewRun(startAreaIndex);
+  };
+
+  const handleGoHome = () => {
+    clearTimeout(crashBurstTimerRef.current);
+    setCrashBurstText(null);
+    setGameOverSummary(null);
+    setShowMissions(false);
+    engineRef.current?.setPhase('menu');
+    setPhase('menu');
+  };
+
+  const handleShareScore = async () => {
+    if (!gameOverSummary) return;
+    const shareText = `চট্টগ্রাম এক্সপ্রেস 🛺\n${gameOverSummary.headline}\nস্কোর: ${toBn(gameOverSummary.score)} | জাতীয় ক্ষতি: ৳${toBn(gameOverSummary.nationalDamage)} | এলাকা: ${gameOverSummary.areaName}`;
+    try {
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        await navigator.share({
+          title: 'চট্টগ্রাম এক্সপ্রেস',
+          text: shareText,
+        });
+        return;
+      }
+    } catch {
+      // Fall back to clipboard if share sheet dismissed or unsupported
+    }
+    try {
+      await navigator.clipboard?.writeText(shareText);
+      pushToast({
+        text: 'খবরের হেডলাইন কপি হয়েছে! বন্ধুদের পাঠান 📋',
+        tone: 'success',
+        priority: 'level',
+      });
+    } catch {
+      pushToast({
+        text: 'শেয়ার প্রস্তুত! স্কোর ৳' + toBn(gameOverSummary.score),
+        tone: 'info',
+        priority: 'level',
+      });
+    }
   };
 
   const handleOpenGarage = (from: 'menu' | 'gameover') => {
@@ -837,6 +891,22 @@ export default function App() {
         />
       )}
 
+      {/* Big Comic Crash Burst Text Popup ("ধপাস!") */}
+      {crashBurstText && (
+        <div
+          key={crashBurstKey}
+          className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center"
+        >
+          <div className="animate-dhopas-burst relative flex items-center justify-center">
+            <div className="rounded-[2rem] border-4 border-stone-950 bg-gradient-to-br from-yellow-300 via-amber-400 to-red-500 px-8 py-3 shadow-[6px_6px_0_#1c1917]">
+              <span className="title-text-3d block text-5xl font-black tracking-wide text-white sm:text-7xl">
+                {crashBurstText}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Combo Gold Edge Flash Overlay */}
       {comboFlashActive && (
         <div
@@ -1016,14 +1086,29 @@ export default function App() {
 
       {/* Game Over Satirical Newspaper */}
       {phase === 'gameover' && gameOverSummary && (
-        <GameOverModal
-          summary={gameOverSummary}
-          totalTaka={save.taka}
-          driverProgression={driverProgression}
-          onRestart={handleStartGame}
-          onOpenGarage={() => handleOpenGarage('gameover')}
-          onOpenMissions={() => setShowMissions(true)}
-        />
+        <>
+          <GameOverModal
+            summary={gameOverSummary}
+            totalTaka={save.taka}
+            highScore={save.highScore}
+            driverProgression={driverProgression}
+            onRestart={handleStartGame}
+            onShare={handleShareScore}
+            onGoHome={handleGoHome}
+            onOpenGarage={() => handleOpenGarage('gameover')}
+            onOpenMissions={() => setShowMissions(true)}
+          />
+          {activeToast && (
+            <div className="pointer-events-none fixed left-1/2 top-4 z-50 flex w-[88vw] max-w-sm -translate-x-1/2 justify-center">
+              <div
+                key={activeToast.id}
+                className="animate-toast-pop sticker-chip max-h-[44px] truncate rounded-full bg-emerald-400/95 px-4 py-1 text-center text-xs font-black text-stone-950 sm:text-sm"
+              >
+                {activeToast.text}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Daily Missions Modal */}

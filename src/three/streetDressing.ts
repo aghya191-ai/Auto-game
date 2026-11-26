@@ -23,9 +23,9 @@ const CHUNK_LEN = 45;
 
 // Pool capacities per chunk
 const BUILDINGS_PER_CHUNK = 6; // 3 left, 3 right
-const SHOPS_PER_CHUNK = 6;
-const BANNERS_PER_CHUNK = 4;
-const POSTERS_PER_CHUNK = 8;
+const SHOPS_PER_CHUNK = 12; // 2 continuous storefronts per building
+const BANNERS_PER_CHUNK = 6;
+const POSTERS_PER_CHUNK = 12;
 const BILLBOARDS_PER_CHUNK = 2;
 
 // InstancedMesh slot capacities per chunk
@@ -34,16 +34,16 @@ const CLOTHES_PER_CHUNK = 32;
 const ACS_PER_CHUNK = 28;
 const DISHES_PER_CHUNK = 12;
 const TANKS_PER_CHUNK = 10;
-const TIN_ROOFS_PER_CHUNK = 12;
-const SHUTTERS_PER_CHUNK = 18;
-const CRATES_PER_CHUNK = 34;
+const TIN_ROOFS_PER_CHUNK = 14;
+const SHUTTERS_PER_CHUNK = 24;
+const CRATES_PER_CHUNK = 56;
 const BINS_PER_CHUNK = 8;
-const GARBAGE_PER_CHUNK = 12;
-const BIKES_PER_CHUNK = 8;
+const GARBAGE_PER_CHUNK = 14;
+const BIKES_PER_CHUNK = 12;
 const TREES_PER_CHUNK = 14;
-const BUSHES_PER_CHUNK = 26;
+const BUSHES_PER_CHUNK = 28;
 const POLES_PER_CHUNK = 6;
-const HAWKERS_PER_CHUNK = 5;
+const HAWKERS_PER_CHUNK = 8;
 
 const _dummy = new THREE.Object3D();
 const _mat4 = new THREE.Matrix4();
@@ -549,11 +549,11 @@ export class StreetDressingManager {
       buildings.push({ group, body, parapet, stairRoom });
     }
 
-    // 2. Pooled Ground-Floor Shops (Signboard + Awning)
+    // 2. Pooled Ground-Floor Shops (Continuous Signboard + Wide Striped Awning)
     const shops: ShopSlot[] = [];
-    const signGeo = new THREE.PlaneGeometry(5.6, 1.15);
-    const signBackGeo = new THREE.BoxGeometry(0.14, 1.24, 5.8);
-    const awningGeo = new THREE.BoxGeometry(1.65, 0.12, 6.2);
+    const signGeo = new THREE.PlaneGeometry(6.6, 1.18);
+    const signBackGeo = new THREE.BoxGeometry(0.14, 1.26, 6.8);
+    const awningGeo = new THREE.BoxGeometry(1.72, 0.12, 7.25);
     for (let i = 0; i < SHOPS_PER_CHUNK; i++) {
       const group = new THREE.Group();
       const signBack = new THREE.Mesh(signBackGeo, this.trussMat);
@@ -562,7 +562,7 @@ export class StreetDressingManager {
       signMesh.position.set(0.09, 3.65, 0);
       signMesh.rotation.y = Math.PI / 2;
       const awningMesh = new THREE.Mesh(awningGeo, this.awningMats[0]);
-      awningMesh.position.set(0.84, 2.95, 0);
+      awningMesh.position.set(0.86, 2.95, 0);
       awningMesh.rotation.z = -0.18;
       group.add(signBack, signMesh, awningMesh);
       sceneryGroup.add(group);
@@ -835,11 +835,11 @@ export class StreetDressingManager {
     let cPoleHw = 0;
     let cHawker = 0;
 
-    // 1. Buildings (3 slots per side; highway leaves 1 slot open occasionally for openness)
+    // 1. Buildings (3 continuous wide slots per side — zero empty gaps)
     let bIdx = 0;
     let shopIdx = 0;
     let posterIdx = 0;
-    const zSlots = [-14.8, 0.0, 14.8];
+    const zSlots = [-15.0, 0.0, 15.0];
 
     const clothesColors = ['#ef4444', '#facc15', '#38bdf8', '#ec4899', '#f8fafc', '#22c55e', '#f97316'];
     const tankColors = ['#18181b', '#18181b', '#0369a1', '#065f46'];
@@ -854,12 +854,6 @@ export class StreetDressingManager {
       for (let s = 0; s < zSlots.length; s++) {
         const slot = pool.buildings[bIdx++];
         if (!slot) continue;
-
-        // Highway zones have wider open gaps between buildings
-        if (density === 'sparse' && s === 1 && rng() < 0.6) {
-          slot.group.visible = false;
-          continue;
-        }
         slot.group.visible = true;
 
         const floors =
@@ -870,11 +864,11 @@ export class StreetDressingManager {
             : 4 + Math.floor(rng() * 4); // 4-7 floors
         const geoIdx = Math.max(0, Math.min(5, floors - 4));
         const bHeight = floors * 2.95 + 1.4;
-        const bDepth = 5.8 + rng() * 3.0; // X thickness
-        const bWidth = density === 'high' ? 12.2 + rng() * 2.4 : 10.4 + rng() * 3.2; // Z frontage
-        const setback = 12.6 + bDepth * 0.5 + (density === 'sparse' ? 0.9 : rng() * 0.65);
+        const bDepth = 5.8 + rng() * 2.8; // X thickness
+        const bWidth = 14.5 + rng() * 0.9; // Full 15m frontage so sides stay packed
+        const setback = 12.5 + bDepth * 0.5 + (density === 'sparse' ? 0.35 : rng() * 0.4);
         const bx = side * setback;
-        const bz = zSlots[s] + (rng() - 0.5) * 1.1;
+        const bz = zSlots[s] + (rng() - 0.5) * 0.35;
         const frontFaceX = bx - side * (bDepth * 0.5);
 
         const matPick = Math.floor(rng() * this.facadeMats.length);
@@ -922,7 +916,7 @@ export class StreetDressingManager {
         }
 
         // Rooftop or Front Satellite Dishes
-        if (cDish < DISHES_PER_CHUNK && (density === 'modern' || rng() > 0.45)) {
+        if (cDish < DISHES_PER_CHUNK && (density === 'modern' || rng() > 0.4)) {
           this.setSlotMatrix(
             this.layers.dish,
             chunkIndex,
@@ -942,8 +936,8 @@ export class StreetDressingManager {
         }
 
         // Tin-Roof Extension on roof or shopfront overhang
-        if (cTin < TIN_ROOFS_PER_CHUNK && (density !== 'modern' || rng() > 0.6)) {
-          const onRoof = rng() > 0.48;
+        if (cTin < TIN_ROOFS_PER_CHUNK && (density !== 'modern' || rng() > 0.5)) {
+          const onRoof = rng() > 0.45;
           this.setSlotMatrix(
             this.layers.tinRoof,
             chunkIndex,
@@ -1031,13 +1025,13 @@ export class StreetDressingManager {
           }
         }
 
-        // Ground-Floor Shopfront (Signboard + Awning + Shutters + Outside Stacked Goods)
-        const hasShop = density !== 'sparse' || rng() > 0.35;
-        if (hasShop && shopIdx < SHOPS_PER_CHUNK) {
-          const shopPreset = SHOP_CATALOG[(seedIdx * 3 + shopIdx + s) % SHOP_CATALOG.length];
+        // Continuous Ground-Floor Shopfront Pair (2 side-by-side shops per 15m building!)
+        for (let sub = 0; sub < 2 && shopIdx < SHOPS_PER_CHUNK; sub++) {
+          const shopZ = bz + (sub === 0 ? -3.65 : 3.65);
+          const shopPreset = SHOP_CATALOG[(seedIdx * 5 + shopIdx + s + sub) % SHOP_CATALOG.length];
           const sSlot = pool.shops[shopIdx++];
           sSlot.group.visible = true;
-          sSlot.group.position.set(frontFaceX, 0, bz);
+          sSlot.group.position.set(frontFaceX, 0, shopZ);
           sSlot.group.rotation.y = side === -1 ? 0 : Math.PI;
           sSlot.signMesh.material = this.shopSignMats[(seedIdx * 3 + shopIdx) % this.shopSignMats.length];
           sSlot.awningMesh.material = this.awningMats[(seedIdx + shopIdx) % this.awningMats.length];
@@ -1050,7 +1044,7 @@ export class StreetDressingManager {
               cShutter++,
               frontFaceX - side * 0.06,
               0,
-              bz + 3.6,
+              shopZ + 1.9,
               0,
               side === -1 ? 0 : Math.PI,
               0,
@@ -1062,16 +1056,16 @@ export class StreetDressingManager {
             );
           }
 
-          // Stacked goods outside shop on outer sidewalk edge (x around ±11.6..±12.2)
-          const goodsCount = density === 'high' ? 3 : 2;
+          // Stacked goods/crates outside every shop along sidewalk edge
+          const goodsCount = density === 'sparse' ? 2 : 3;
           for (let g = 0; g < goodsCount && cCrate < CRATES_PER_CHUNK; g++) {
             this.setSlotMatrix(
               this.layers.crate,
               chunkIndex,
               cCrate++,
-              frontFaceX - side * (0.55 + rng() * 0.45),
+              frontFaceX - side * (0.5 + rng() * 0.55),
               0.2,
-              bz - 2.4 + g * 2.1 + (rng() - 0.5) * 0.5,
+              shopZ - 2.1 + g * 1.95 + (rng() - 0.5) * 0.35,
               0,
               (rng() - 0.5) * 0.4,
               0,
@@ -1079,13 +1073,13 @@ export class StreetDressingManager {
               0.9 + rng() * 0.28,
               0.9 + rng() * 0.25,
               shopPreset.crateColors[g % 3],
-              g > 0 ? 1 : 0
+              g > 1 ? 1 : 0
             );
           }
         }
 
         // Political-Free Wall Posters (movies, school admission, sale offers)
-        if (posterIdx < POSTERS_PER_CHUNK && (density === 'high' || rng() > 0.3)) {
+        if (posterIdx < POSTERS_PER_CHUNK && (density === 'high' || rng() > 0.2)) {
           const pm = pool.posters[posterIdx++];
           pm.visible = true;
           pm.material = this.posterMats[(seedIdx * 5 + posterIdx) % this.posterMats.length];
@@ -1100,7 +1094,7 @@ export class StreetDressingManager {
     for (let i = posterIdx; i < POSTERS_PER_CHUNK; i++) pool.posters[i].visible = false;
 
     // 2. Hanging Political-Free Bangla Banners along sidewalk poles
-    const bannerTarget = density === 'high' ? 4 : density === 'sparse' ? 2 : 3;
+    const bannerTarget = density === 'sparse' ? 4 : 6;
     for (let i = 0; i < BANNERS_PER_CHUNK; i++) {
       const bSlot = pool.banners[i];
       if (i >= bannerTarget) {
@@ -1110,30 +1104,25 @@ export class StreetDressingManager {
       bSlot.group.visible = true;
       const side = i % 2 === 0 ? -1 : 1;
       bSlot.plane.material = this.bannerMats[(seedIdx * 2 + i) % this.bannerMats.length];
-      bSlot.group.position.set(side * 10.7, 4.95 + (i % 2) * 0.35, -15 + i * 10);
+      bSlot.group.position.set(side * 10.7, 4.95 + (i % 2) * 0.35, -17 + i * 6.8);
       bSlot.group.rotation.set(0, side === -1 ? 0.14 : -0.14, (rng() - 0.5) * 0.04);
     }
 
-    // 3. Billboard Frames
-    const bbTarget = density === 'sparse' || density === 'modern' ? 2 : seedIdx % 2 === 0 ? 2 : 1;
+    // 3. Billboard Frames (always 2 per chunk, both sides)
     for (let i = 0; i < BILLBOARDS_PER_CHUNK; i++) {
       const bb = pool.billboards[i];
-      if (i >= bbTarget) {
-        bb.group.visible = false;
-        continue;
-      }
       bb.group.visible = true;
-      const side: -1 | 1 = (seedIdx + i) % 2 === 0 ? 1 : -1;
+      const side: -1 | 1 = i === 0 ? 1 : -1;
       bb.face.material = this.billboardMats[(seedIdx * 2 + i) % this.billboardMats.length];
       bb.group.position.set(side * 11.45, 0, i === 0 ? -6.5 : 12.5);
       bb.group.rotation.y = side === 1 ? 0.22 : Math.PI - 0.22;
     }
 
-    // 4. Overhead Wires Density & Pole Transformers + Cable Bundles
+    // 4. Overhead Wires Density & Pole Transformers + Cable Bundles (dense on every chunk)
     const wireCount =
-      density === 'high' ? 18 : density === 'medium_high' ? 14 : density === 'modern' ? 10 : 7;
+      density === 'high' ? 18 : density === 'medium_high' ? 16 : density === 'modern' ? 14 : 12;
     pool.wireCluster.crossWires.forEach((line, idx) => {
-      line.visible = idx < wireCount && (seedIdx % 2 === 0 || idx % 2 === 0);
+      line.visible = idx < wireCount;
     });
 
     [-9.3, 9.3].forEach((px, pSideIdx) => {
@@ -1159,10 +1148,10 @@ export class StreetDressingManager {
       }
     });
 
-    // 5. Pedestrian Footbridge every 3-4 zones when flyover isn't present on that chunk
-    const showFootbridge = !area.hasFlyover && seedIdx % 3 === 1;
+    // 5. Pedestrian Footbridge every ~135-150 m (clear of flyover pillars at z=0 and road signs at z=-15)
+    const showFootbridge = seedIdx % 3 === 1;
     pool.footbridge.group.visible = showFootbridge;
-    pool.footbridge.group.position.set(0, 0, -4.0);
+    pool.footbridge.group.position.set(0, 0, 11.2);
 
     // 6. Trees & Bushes (sidewalks + center median divider via InstancedMesh!)
     const dividerStart = hasDivider ? -20 : 0;
@@ -1247,7 +1236,7 @@ export class StreetDressingManager {
     });
 
     // 7. Litter Bins, Garbage Piles, Parked Bikes & Hawker Carts (strictly on sidewalks, road clear!)
-    const binCount = density === 'modern' ? 6 : 4;
+    const binCount = 6;
     for (let i = 0; i < binCount && cBin < BINS_PER_CHUNK; i++) {
       const side = i % 2 === 0 ? -1 : 1;
       this.setSlotMatrix(
@@ -1256,7 +1245,7 @@ export class StreetDressingManager {
         cBin++,
         side * (9.2 + rng() * 0.3),
         0.2,
-        -17 + i * 9 + rng() * 3,
+        -17 + i * 7 + rng() * 2,
         0,
         rng() * Math.PI,
         0,
@@ -1268,7 +1257,7 @@ export class StreetDressingManager {
       );
     }
 
-    const garbCount = density === 'high' ? 8 : density === 'modern' ? 2 : 5;
+    const garbCount = density === 'modern' ? 4 : 8;
     for (let i = 0; i < garbCount && cGarb < GARBAGE_PER_CHUNK; i++) {
       const side = i % 2 === 0 ? -1 : 1;
       this.setSlotMatrix(
@@ -1277,7 +1266,7 @@ export class StreetDressingManager {
         cGarb++,
         side * (11.7 + rng() * 0.5),
         0.2,
-        -19 + i * 5.2 + rng() * 2,
+        -19 + i * 5.0 + rng() * 2,
         0,
         rng() * Math.PI,
         0,
@@ -1289,7 +1278,7 @@ export class StreetDressingManager {
       );
     }
 
-    const bikeCount = density === 'high' ? 6 : density === 'sparse' ? 3 : 5;
+    const bikeCount = density === 'sparse' ? 6 : 10;
     for (let i = 0; i < bikeCount && cBike < BIKES_PER_CHUNK; i++) {
       const side = i % 2 === 0 ? -1 : 1;
       this.setSlotMatrix(
@@ -1298,7 +1287,7 @@ export class StreetDressingManager {
         cBike++,
         side * (9.25 + rng() * 0.25),
         0.2,
-        -14 + i * 6.5 + rng() * 2,
+        -18 + i * 4.0 + rng() * 1.4,
         0,
         side * (0.25 + rng() * 0.3),
         0,
@@ -1310,12 +1299,12 @@ export class StreetDressingManager {
       );
     }
 
-    const hawkerCount = density === 'high' ? 4 : density === 'sparse' ? 1 : 2;
+    const hawkerCount = density === 'sparse' ? 4 : 7;
     const canopyColors = ['#dc2626', '#eab308', '#0284c7', '#16a34a', '#ea580c'];
     for (let i = 0; i < hawkerCount && cHawker < HAWKERS_PER_CHUNK; i++) {
       const side = i % 2 === 0 ? -1 : 1;
       const hx = side * (10.35 + rng() * 0.35);
-      const hz = -12 + i * 10 + (rng() - 0.5) * 3;
+      const hz = -17 + i * 5.6 + (rng() - 0.5) * 1.6;
       const hRot = side === -1 ? 0.08 : Math.PI - 0.08;
       this.setSlotMatrix(this.layers.hawkerCart, chunkIndex, cHawker, hx, 0.2, hz, 0, hRot, 0, 1, 1, 1, undefined, 0);
       this.setSlotMatrix(

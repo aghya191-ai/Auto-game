@@ -185,6 +185,7 @@ export interface HudSnapshot {
   passengerFare: number;
   passengerDistLeft: number;
   passengerNearPickup: boolean;
+  pickupProgress: number;
   activeEvent: { kind: RandomEventKind; label: string; emoji: string; timeLeft: number } | null;
   cameraMode: CameraMode;
   steerDir: -1 | 0 | 1;
@@ -212,6 +213,7 @@ export interface GameOverSummary {
   loopCount: number;
   distanceMeters: number;
   isNewRecord: boolean;
+  crashPhotoDataUrl?: string;
 }
 
 export interface InputState {

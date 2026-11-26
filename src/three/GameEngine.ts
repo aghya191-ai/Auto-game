@@ -84,7 +84,7 @@ const LANES = [-6.0, -2.8, 2.8, 6.0];
 const RAIN_COUNT = 340;
 const PUFF_COUNT = 28;
 const DUST_COUNT = 44;
-const DEBRIS_COUNT = 40;
+const DEBRIS_COUNT = 76;
 const MAX_DETAILED_PEDESTRIANS = 25;
 
 interface LodEntry {
@@ -176,6 +176,7 @@ interface PedestrianEntity {
   speechTimer: number;
   reactYaw: number;
   reactTimer: number;
+  closePassReacted?: boolean;
 }
 
 interface ZoneEntity {
@@ -193,7 +194,17 @@ interface WaitingPassengerEntity {
   x: number;
   z: number;
   wavePhase: number;
+  boardTimer: number;
   pickedUp: boolean;
+}
+
+interface StallEntity {
+  group: THREE.Group;
+  x: number;
+  z: number;
+  hit: boolean;
+  halfWidth: number;
+  halfLength: number;
 }
 
 interface DiggingBarrierEntity {
@@ -227,6 +238,7 @@ export interface EngineCallbacks {
   onDriverXpGain?: (xp: number) => void;
   onGameOver: (summary: GameOverSummary) => void;
   onCrashJuice?: (intensity: 'minor' | 'major') => void;
+  onCrashBurstText?: (text: string) => void;
 }
 
 export class GameEngine {
@@ -287,9 +299,12 @@ export class GameEngine {
   private pedestrians: PedestrianEntity[] = [];
   private zones: ZoneEntity[] = [];
   private waitingPassengers: WaitingPassengerEntity[] = [];
+  private stalls: StallEntity[] = [];
   private diggingBarriers: DiggingBarrierEntity[] = [];
   private gantries: GantryEntity[] = [];
   private trafficLights: TrafficLightEntity[] = [];
+  private pickupRingGroup!: THREE.Group;
+  private pickupRingProgressSegments: THREE.Mesh[] = [];
   private floodWaterMesh!: THREE.Mesh;
   private floodWaterMat!: THREE.MeshStandardMaterial;
 
@@ -367,6 +382,10 @@ export class GameEngine {
   private slowMoTimer = 0;
   private slowMoDuration = 0.34;
   private gameoverImpactTimer = 0;
+  private crashCinematicActive = false;
+  private crashCinematicTimer = 0;
+  private pendingGameOverSummary: GameOverSummary | null = null;
+  private stallSpawnDist = 25;
   private boostFovKick = 0;
   private wasBoosting = false;
   private hornZoomPulse = 0;
@@ -454,6 +473,7 @@ export class GameEngine {
     this.renderer = new THREE.WebGLRenderer({
       antialias: !this.isSoftwareGl,
       powerPreference: 'high-performance',
+      preserveDrawingBuffer: true,
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -774,6 +794,32 @@ export class GameEngine {
     this.cockpitRig.rightMirrorMat.needsUpdate = true;
 
     this.cngRig.group.add(this.cockpitRig.group);
+
+    // Dotted White Pickup Ring around the CNG (shown when a passenger can be picked up)
+    this.pickupRingGroup = new THREE.Group();
+    const dashCount = 24;
+    const outerDashGeo = new THREE.BoxGeometry(0.36, 0.025, 0.13);
+    const outerDashMat = new THREE.MeshBasicMaterial({ color: '#ffffff' });
+    const innerDashGeo = new THREE.BoxGeometry(0.28, 0.03, 0.11);
+    this.pickupRingProgressSegments = [];
+    for (let i = 0; i < dashCount; i++) {
+      const theta = (i / dashCount) * Math.PI * 2;
+      const dash = new THREE.Mesh(outerDashGeo, outerDashMat);
+      dash.position.set(Math.sin(theta) * 2.65, 0.05, Math.cos(theta) * 2.65);
+      dash.rotation.y = theta;
+      this.pickupRingGroup.add(dash);
+
+      const progMat = new THREE.MeshBasicMaterial({ color: '#22d3ee' });
+      const progDash = new THREE.Mesh(innerDashGeo, progMat);
+      progDash.position.set(Math.sin(theta) * 2.15, 0.055, Math.cos(theta) * 2.15);
+      progDash.rotation.y = theta;
+      progDash.visible = false;
+      this.pickupRingGroup.add(progDash);
+      this.pickupRingProgressSegments.push(progDash);
+    }
+    this.pickupRingGroup.visible = false;
+    this.cngRig.group.add(this.pickupRingGroup);
+
     this.cngRig.group.position.set(2.8, 0, 0);
     this.scene.add(this.cngRig.group);
     this.syncCameraVisibility();
@@ -853,7 +899,17 @@ export class GameEngine {
     this.debrisMesh.frustumCulled = false;
     _debrisDummy.scale.setScalar(0);
     _debrisDummy.updateMatrix();
-    const debrisPalette = ['#16a34a', '#facc15', '#ef4444', '#94a3b8', '#27272a', '#bae6fd'];
+    const debrisPalette = [
+      '#16a34a',
+      '#facc15',
+      '#ef4444',
+      '#94a3b8',
+      '#92400e',
+      '#b45309',
+      '#f97316',
+      '#22c55e',
+      '#fde047',
+    ];
     this.debrisPool = [];
     for (let i = 0; i < DEBRIS_COUNT; i++) {
       this.debrisPool.push({
@@ -1323,6 +1379,10 @@ export class GameEngine {
     this.shakeTrauma = 0;
     this.slowMoTimer = 0;
     this.gameoverImpactTimer = 0;
+    this.crashCinematicActive = false;
+    this.crashCinematicTimer = 0;
+    this.pendingGameOverSummary = null;
+    this.stallSpawnDist = 25;
     this.boostFovKick = 0;
     this.wasBoosting = false;
     this.wheelDustAccum = 0;
@@ -1346,6 +1406,7 @@ export class GameEngine {
     this.cngRig.group.rotation.set(0, 0, 0);
     this.cngRig.bodyGroup.rotation.set(0, 0, 0);
     this.cngRig.group.visible = true;
+    if (this.pickupRingGroup) this.pickupRingGroup.visible = false;
 
     const firstArea = AREAS[this.areaIndex];
     this.roadChunks.forEach((chunk, idx) => {
@@ -1377,6 +1438,10 @@ export class GameEngine {
       this.scene.remove(wp.pad);
     }
     this.waitingPassengers = [];
+    for (const s of this.stalls) {
+      this.scene.remove(s.group);
+    }
+    this.stalls = [];
     for (const b of this.diggingBarriers) {
       this.scene.remove(b.rig.group);
     }
@@ -1389,6 +1454,10 @@ export class GameEngine {
     this.activeEventTimer = 0;
     this.vipSpawned = false;
     this.vipYieldAwarded = false;
+    this.crashCinematicActive = false;
+    this.crashCinematicTimer = 0;
+    this.pendingGameOverSummary = null;
+    if (this.pickupRingGroup) this.pickupRingGroup.visible = false;
     if (this.floodWaterMesh) {
       this.floodWaterMesh.visible = false;
       this.floodWaterMat.opacity = 0;
@@ -1457,6 +1526,32 @@ export class GameEngine {
     }
   }
 
+  private spawnStallDebrisBurst(x: number, y: number, z: number, count = 22): void {
+    if (!this.debrisMesh) return;
+    for (let i = 0; i < count; i++) {
+      const p = this.debrisPool[this.debrisCursor];
+      this.debrisCursor = (this.debrisCursor + 1) % DEBRIS_COUNT;
+      const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.7;
+      const spd = 2.0 + Math.random() * 4.4;
+      p.active = true;
+      p.x = x + (Math.random() - 0.5) * 0.7;
+      p.y = y + Math.random() * 0.55;
+      p.z = z + (Math.random() - 0.5) * 0.7;
+      p.vx = Math.cos(angle) * spd;
+      p.vy = 2.6 + Math.random() * 3.4;
+      p.vz = Math.sin(angle) * spd + (Math.random() - 0.3) * 2.5;
+      p.rx = Math.random() * Math.PI;
+      p.ry = Math.random() * Math.PI;
+      p.rz = Math.random() * Math.PI;
+      p.vrx = (Math.random() - 0.5) * 16;
+      p.vry = (Math.random() - 0.5) * 16;
+      p.vrz = (Math.random() - 0.5) * 16;
+      p.scale = 0.95 + Math.random() * 0.85;
+      p.age = 0;
+      p.maxAge = 2.6 + Math.random() * 1.1; // Stays scattered on road briefly (~3s)
+    }
+  }
+
   private updateDebrisParticles(dt: number, distStep: number): void {
     if (!this.debrisMesh) return;
     let dirty = false;
@@ -1476,17 +1571,22 @@ export class GameEngine {
       p.y += p.vy * dt;
       p.vy -= 14.5 * dt;
       p.z += p.vz * dt + distStep;
-      if (p.y < 0.08) {
-        p.y = 0.08;
-        p.vy = Math.abs(p.vy) * 0.38;
-        p.vx *= 0.72;
-        p.vz *= 0.72;
+      if (p.y < 0.09) {
+        p.y = 0.09;
+        p.vy = Math.abs(p.vy) > 0.8 ? Math.abs(p.vy) * 0.34 : 0;
+        p.vx *= 0.65;
+        p.vz *= 0.65;
+        if (Math.abs(p.vx) < 0.15) {
+          p.vrx *= 0.8;
+          p.vry *= 0.8;
+          p.vrz *= 0.8;
+        }
       }
       p.rx += p.vrx * dt;
       p.ry += p.vry * dt;
       p.rz += p.vrz * dt;
       const t = p.age / p.maxAge;
-      const s = p.scale * (t > 0.75 ? Math.max(0.01, (1 - t) * 4) : 1);
+      const s = p.scale * (t > 0.8 ? Math.max(0.01, (1 - t) * 5) : 1);
       _debrisDummy.position.set(p.x, p.y, p.z);
       _debrisDummy.rotation.set(p.rx, p.ry, p.rz);
       _debrisDummy.scale.setScalar(s);
@@ -1751,13 +1851,61 @@ export class GameEngine {
     }
   }
 
+  private spawnRoadsideStall(side: -1 | 1, z = -142): void {
+    if (this.stalls.length >= 6) return;
+    const x = side * 7.85;
+    const group = new THREE.Group();
+
+    const crateMat = new THREE.MeshStandardMaterial({ color: '#92400e', roughness: 0.85 });
+    const topCrateMat = new THREE.MeshStandardMaterial({ color: '#b45309', roughness: 0.82 });
+    const poleMat = new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.6 });
+    const umbColors = ['#ef4444', '#facc15', '#0284c7', '#16a34a', '#ea580c'];
+    const umbMat = new THREE.MeshStandardMaterial({
+      color: umbColors[Math.floor(Math.random() * umbColors.length)],
+      roughness: 0.68,
+      side: THREE.DoubleSide,
+    });
+
+    const baseCrate = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.56, 1.75), crateMat);
+    baseCrate.position.set(0, 0.28, 0);
+    const sideBox = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.44, 0.68), topCrateMat);
+    sideBox.position.set(-side * 0.16, 0.78, -0.35);
+
+    const fruitColors = ['#facc15', '#f97316', '#ef4444', '#22c55e'];
+    for (let f = 0; f < 5; f++) {
+      const fruit = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(0.14, 0),
+        new THREE.MeshStandardMaterial({ color: fruitColors[f % fruitColors.length], roughness: 0.5 })
+      );
+      fruit.position.set((f % 2 - 0.5) * 0.35, 0.68 + Math.floor(f / 3) * 0.14, -0.25 + f * 0.2);
+      group.add(fruit);
+    }
+
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 1.9, 6), poleMat);
+    pole.position.set(side * 0.12, 1.25, 0.25);
+    const umb = new THREE.Mesh(new THREE.ConeGeometry(1.05, 0.42, 8), umbMat);
+    umb.position.set(side * 0.12, 2.22, 0.25);
+
+    group.add(baseCrate, sideBox, pole, umb);
+    group.position.set(x, 0, z);
+    this.scene.add(group);
+    this.stalls.push({
+      group,
+      x,
+      z,
+      hit: false,
+      halfWidth: 0.72,
+      halfLength: 1.05,
+    });
+  }
+
   private spawnPedestrian(forcedZ?: number): void {
     if (this.pedestrians.length >= 42) return;
     const side: -1 | 1 = Math.random() < 0.5 ? -1 : 1;
     const baseZ = forcedZ ?? -136 - Math.random() * 20;
     const roll = Math.random();
 
-    if (roll < 0.16 && this.pedestrians.length <= 39) {
+    if (roll < 0.22 && this.pedestrians.length <= 39) {
       // Roadside Tea-Stall Sitters on wooden bench along brick sidewalk (y = 0.20)
       const benchX = side * 11.15;
       const bench = createTeaStallBench(this.maxAnisotropy);
@@ -1939,6 +2087,7 @@ export class GameEngine {
       x,
       z,
       wavePhase: 0,
+      boardTimer: 0,
       pickedUp: false,
     });
   }
@@ -2148,15 +2297,24 @@ export class GameEngine {
     this.input.lookBack = false;
     this.cngRig.group.visible = true;
     this.syncCameraVisibility();
+    if (this.pickupRingGroup) this.pickupRingGroup.visible = false;
     this.resetExhaustPuffs();
     this.shakeTrauma = 1.0;
-    this.gameoverImpactTimer = 0.55;
     this.spawnDustBurst(this.playerX, 0.35, 0, 14);
-    this.spawnDebrisBurst(this.playerX, 0.65, -0.2, 20, 1.4);
+    this.spawnDebrisBurst(this.playerX, 0.65, -0.2, 22, 1.45);
     this.sound.stopEngine();
     this.sound.playCrash(true);
     this.vibrate([80, 35, 110]);
     this.callbacks.onCrashJuice?.('major');
+
+    // Render exact crash moment & capture canvas photo for the newspaper ("ঘটনাস্থলের ছবি")
+    let crashPhotoDataUrl: string | undefined;
+    try {
+      this.renderer.render(this.scene, this.camera);
+      crashPhotoDataUrl = this.renderer.domElement.toDataURL('image/jpeg', 0.86);
+    } catch {
+      crashPhotoDataUrl = undefined;
+    }
 
     const pool = SATIRE_HEADLINES[reason];
     const pick = pool[Math.floor(Math.random() * pool.length)];
@@ -2164,8 +2322,7 @@ export class GameEngine {
     const isNewRecord = finalScore > this.highScoreRef;
     if (isNewRecord) this.highScoreRef = finalScore;
 
-    this.emitHud();
-    this.callbacks.onGameOver({
+    const summary: GameOverSummary = {
       reason,
       headline: pick.headline,
       subheadline: pick.subheadline,
@@ -2176,7 +2333,24 @@ export class GameEngine {
       loopCount: this.loopCount,
       distanceMeters: Math.round(this.distanceMeters),
       isNewRecord,
-    });
+      crashPhotoDataUrl,
+    };
+
+    this.emitHud();
+
+    // Crash Cinematic (0.6s slow-mo + "ধপাস!" + 2.0s top-down orbit showing converging crowd)
+    if (reason === 'bus' || reason === 'truck' || reason === 'pedestrian') {
+      this.crashCinematicActive = true;
+      this.crashCinematicTimer = 0;
+      this.gameoverImpactTimer = 2.65;
+      this.pendingGameOverSummary = summary;
+      this.triggerCrowdReaction(this.playerX, 0, 'crash', 6);
+      this.callbacks.onCrashBurstText?.('ধপাস!');
+      return;
+    }
+
+    this.gameoverImpactTimer = 0.55;
+    this.callbacks.onGameOver(summary);
   }
 
   private emitHud(): void {
@@ -2332,6 +2506,13 @@ export class GameEngine {
 
     const activeEventCfg = this.activeEventKind ? RANDOM_EVENTS[this.activeEventKind] : null;
 
+    let pickupProgress = 0;
+    for (const wp of this.waitingPassengers) {
+      if (!wp.pickedUp) {
+        pickupProgress = Math.max(pickupProgress, Math.min(1, wp.boardTimer / 1.5));
+      }
+    }
+
     this.callbacks.onHudUpdate({
       score: Math.round(this.score),
       runTaka: Math.round(this.runTaka),
@@ -2354,6 +2535,7 @@ export class GameEngine {
       passengerFare: this.passengerFare,
       passengerDistLeft: Math.max(0, Math.round(this.passengerDistLeft)),
       passengerNearPickup: nearPickup,
+      pickupProgress,
       activeEvent: activeEventCfg
         ? {
             kind: activeEventCfg.kind,
@@ -2849,12 +3031,14 @@ export class GameEngine {
       }
     }
 
-    // Passenger Pickup & Drop-off
+    // Passenger Pickup (dotted white ring + 1.5s hold inside) & Drop-off
     if (!this.passengerActive && this.distanceSincePassenger > 85 && this.waitingPassengers.length === 0) {
       this.distanceSincePassenger = 0;
       this.spawnWaitingPassenger();
     }
 
+    let bestBoardProgress = 0;
+    let showPickupRing = false;
     for (let i = this.waitingPassengers.length - 1; i >= 0; i--) {
       const wp = this.waitingPassengers[i];
       wp.z += distStep;
@@ -2864,8 +3048,19 @@ export class GameEngine {
       wp.rig.applyPose('wave', wp.wavePhase);
       wp.rig.alertBadge.rotation.y += dt * 3;
 
-      const nearSide = Math.abs(wp.x - this.playerX) < 3.4 && Math.abs(wp.z) < 5.0;
-      if (!wp.pickedUp && nearSide && this.playerSpeed < 17) {
+      if (!this.passengerActive && !wp.pickedUp && wp.z > -36 && wp.z < 10) {
+        showPickupRing = true;
+      }
+
+      const nearSide = Math.abs(wp.x - this.playerX) < 3.9 && Math.abs(wp.z) < 5.6;
+      if (!wp.pickedUp && nearSide && this.playerSpeed < 4.5) {
+        wp.boardTimer += dt;
+      } else {
+        wp.boardTimer = Math.max(0, wp.boardTimer - dt * 1.5);
+      }
+      bestBoardProgress = Math.max(bestBoardProgress, Math.min(1, wp.boardTimer / 1.5));
+
+      if (!wp.pickedUp && wp.boardTimer >= 1.5) {
         wp.pickedUp = true;
         this.passengerActive = true;
         this.passengerDestination = wp.destination;
@@ -2890,11 +3085,70 @@ export class GameEngine {
       }
     }
 
+    if (this.pickupRingGroup) {
+      this.pickupRingGroup.visible = !this.passengerActive && showPickupRing;
+      if (this.pickupRingGroup.visible) {
+        this.pickupRingGroup.rotation.y += dt * 1.25;
+        const litCount = Math.round(bestBoardProgress * this.pickupRingProgressSegments.length);
+        for (let k = 0; k < this.pickupRingProgressSegments.length; k++) {
+          this.pickupRingProgressSegments[k].visible = k < litCount;
+        }
+      }
+    }
+
     if (this.passengerActive) {
       this.passengerDistLeft -= distStep;
       if (this.passengerDistLeft <= 125 && !this.passengerDropoffSpawned) {
         this.passengerDropoffSpawned = true;
         this.spawnZone('dropoff');
+      }
+    }
+
+    // Roadside Fruit/Crate Stalls along outer shoulder edge (scatter debris when hit)
+    this.stallSpawnDist += distStep;
+    if (this.stallSpawnDist >= 52) {
+      this.stallSpawnDist = 0;
+      const side: -1 | 1 = Math.random() < 0.5 ? -1 : 1;
+      this.spawnRoadsideStall(side, -142);
+    }
+
+    for (let i = this.stalls.length - 1; i >= 0; i--) {
+      const st = this.stalls[i];
+      st.z += distStep;
+      st.group.position.z = st.z;
+
+      const hitX = Math.abs(st.x - this.playerX) < st.halfWidth + 0.72;
+      const hitZ = Math.abs(st.z) < st.halfLength + 1.35;
+      if (!st.hit && hitX && hitZ) {
+        st.hit = true;
+        st.group.visible = false;
+        const stallHpLoss = Math.round(6 * chassisDmgMult);
+        this.hp -= stallHpLoss;
+        this.nationalDamage += 350;
+        this.shakeTimer = 0.25;
+        this.shakeTrauma = Math.max(this.shakeTrauma, 0.55);
+        this.playerSpeed = Math.max(8, this.playerSpeed * 0.75);
+        this.spawnDustBurst(st.x, 0.3, st.z, 9);
+        this.spawnStallDebrisBurst(st.x, 0.55, st.z, 22);
+        this.sound.playCrash(false);
+        this.vibrate([35, 20, 35]);
+        this.callbacks.onCrashJuice?.('minor');
+        this.triggerCrowdReaction(st.x, st.z, 'crash', 1);
+        this.callbacks.onToast({
+          text: 'ফলের দোকান ভেঙেছে! ক্রেট-ফল ছড়িয়ে গেছে 🥭📦',
+          tone: 'danger',
+          priority: 'crash',
+        });
+        if (this.hp <= 0) {
+          this.hp = 0;
+          this.handleGameOver('pedestrian');
+          return;
+        }
+      }
+
+      if (st.z > 24) {
+        this.scene.remove(st.group);
+        this.stalls.splice(i, 1);
       }
     }
 
@@ -3511,6 +3765,29 @@ export class GameEngine {
         p.propGroup.position.z += distStep;
       }
 
+      // Close-pass reaction: pedestrians raise arms, jump away, and shout Bangla lines when CNG passes close
+      if (
+        !p.isChasing &&
+        !p.isProtestor &&
+        p.basePose !== 'sit_tea_stall' &&
+        p.fallTimer <= 0 &&
+        p.jumpBackTimer <= 0 &&
+        !p.closePassReacted &&
+        Math.abs(p.z) < 6.8 &&
+        Math.abs(p.x - this.playerX) < 3.4 &&
+        this.playerSpeed > 7
+      ) {
+        p.closePassReacted = true;
+        p.jumpBackTimer = 0.58;
+        p.walkDir = p.x >= this.playerX ? 1 : -1;
+        p.reactYaw = Math.atan2(this.playerX - p.x, 0 - p.z);
+        p.reactTimer = 1.4;
+        if (p.speechTimer <= 0.05) {
+          p.rig.showSpeech('horn');
+          p.speechTimer = 1.65;
+        }
+      }
+
       let activePose: PedestrianPose = p.basePose;
       let poseAux = 0;
 
@@ -3636,22 +3913,25 @@ export class GameEngine {
     this.updateDustPuffs(dt, distStep);
     this.updateDebrisParticles(dt, distStep);
 
-    // Camera update: FOV kick on boost, smooth continuous trauma shake (frame-rate independent)
+    // Camera update: lower & closer behind CNG (~3.5m back, ~1.8m up), slight lag, speed FOV, turn roll & bump bounce
     this.hornZoomPulse = THREE.MathUtils.damp(this.hornZoomPulse, 0, 11, realDt);
     this.boostFovKick = THREE.MathUtils.damp(this.boostFovKick, 0, 5.2, realDt);
     const speedNorm = Math.min(1, this.playerSpeed / 48);
     const targetFov =
-      58 +
-      speedNorm * 11 +
-      (boosting ? 4.5 : 0) +
+      62 +
+      speedNorm * 14 +
+      (boosting ? 5.5 : 0) +
       this.boostFovKick * 6.5 -
-      this.hornZoomPulse * 3.8;
+      this.hornZoomPulse * 3.5;
     this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 9, realDt);
     this.camera.updateProjectionMatrix();
 
     const traumaSq = this.shakeTrauma * this.shakeTrauma;
     const boostVibX = boosting ? Math.sin(this.realTime * 57) * 0.014 : 0;
     const boostVibY = boosting ? Math.cos(this.realTime * 69) * 0.012 : 0;
+    const roadBumpY =
+      Math.sin(this.animTime * 22) * (0.012 + speedNorm * 0.018) +
+      Math.cos(this.animTime * 11) * speedNorm * 0.009;
     const shakeX =
       traumaSq * (Math.sin(this.realTime * 43) * 0.24 + Math.sin(this.realTime * 79) * 0.14) +
       boostVibX;
@@ -3667,7 +3947,7 @@ export class GameEngine {
       }
 
       const eyeX = this.playerX + shakeX * 0.45;
-      const eyeY = 1.48 + shakeY * 0.35;
+      const eyeY = 1.48 + roadBumpY * 0.65 + shakeY * 0.35;
       const eyeZ = -0.14;
       this.camera.position.set(eyeX, eyeY, eyeZ);
 
@@ -3683,21 +3963,33 @@ export class GameEngine {
       this.camera.lookAt(_camLookAt);
       this.camera.rotateZ(-this.playerRoll * 0.38 + rollShake * 0.65);
     } else if (this.input.lookBack) {
-      _camTargetPos.set(this.playerX * 0.8 + shakeX, 3.6 + shakeY, -6.2);
+      _camTargetPos.set(this.playerX * 0.8 + shakeX, 3.2 + shakeY, -5.8);
       this.camera.position.lerp(_camTargetPos, 1 - Math.exp(-14 * realDt));
       _camLookAt.set(this.playerX * 0.9, 1.35, 12.0);
       this.camera.lookAt(_camLookAt);
       this.camera.rotateZ(rollShake);
     } else {
-      _camTargetPos.set(
-        this.playerX * 0.72 + shakeX,
-        4.85 + shakeY,
-        8.2 - (boosting ? 0.55 : 0) - this.boostFovKick * 0.25
+      const targetCamX = this.playerX * 0.78 + shakeX;
+      const targetCamY = 1.80 + roadBumpY + shakeY;
+      const targetCamZ = 3.50 - (boosting ? 0.32 : 0) - this.boostFovKick * 0.18;
+      this.camera.position.x = THREE.MathUtils.lerp(
+        this.camera.position.x,
+        targetCamX,
+        1 - Math.exp(-8.5 * realDt)
       );
-      this.camera.position.lerp(_camTargetPos, 1 - Math.exp(-11 * realDt));
-      _camLookAt.set(this.playerX * 0.85, 1.35, -8.0);
+      this.camera.position.y = THREE.MathUtils.lerp(
+        this.camera.position.y,
+        targetCamY,
+        1 - Math.exp(-11.5 * realDt)
+      );
+      this.camera.position.z = THREE.MathUtils.lerp(
+        this.camera.position.z,
+        targetCamZ,
+        1 - Math.exp(-11.5 * realDt)
+      );
+      _camLookAt.set(this.playerX * 0.92, 1.12, -8.5);
       this.camera.lookAt(_camLookAt);
-      this.camera.rotateZ(rollShake - this.playerRoll * 0.14);
+      this.camera.rotateZ(rollShake - this.playerRoll * 0.24);
     }
 
     this.hudEmitTimer += realDt;
@@ -3800,6 +4092,77 @@ export class GameEngine {
   private stepGameOverImpact(realDt: number): void {
     this.gameoverImpactTimer = Math.max(0, this.gameoverImpactTimer - realDt);
     this.shakeTrauma = Math.max(0, this.shakeTrauma - realDt * 1.9);
+
+    if (this.crashCinematicActive) {
+      this.crashCinematicTimer += realDt;
+      const inSlowMo = this.crashCinematicTimer < 0.6;
+      const simDt = inSlowMo ? realDt * 0.22 : realDt * 0.92;
+      const drift = inSlowMo ? this.playerSpeed * 0.18 * simDt : 0;
+
+      this.updateDustPuffs(simDt, drift);
+      this.updateDebrisParticles(simDt, drift);
+      this.cngRig.bodyGroup.rotation.z = THREE.MathUtils.damp(
+        this.cngRig.bodyGroup.rotation.z,
+        0.28,
+        5,
+        realDt
+      );
+
+      // Crowd converges around the crashed CNG and shouts/waves
+      for (const p of this.pedestrians) {
+        if (Math.abs(p.z) > 22) continue;
+        if (p.fallTimer > 0) {
+          p.fallTimer -= simDt;
+          p.rig.applyPose('fall', p.animPhase, 1 - Math.max(0, p.fallTimer) / 0.9);
+          continue;
+        }
+        const dx = this.playerX - p.x;
+        const dz = 0 - p.z;
+        const dist = Math.hypot(dx, dz) || 1;
+        if (dist > 2.2) {
+          p.x += (dx / dist) * 4.2 * simDt;
+          p.z += (dz / dist) * 4.2 * simDt;
+        }
+        p.rig.group.position.set(p.x, Math.abs(p.x) >= 8.65 ? 0.20 : 0, p.z);
+        p.rig.group.rotation.y = Math.atan2(dx, dz);
+        p.animPhase += simDt * 11;
+        p.rig.applyPose(dist > 2.6 ? 'run' : 'argue', p.animPhase);
+      }
+
+      if (inSlowMo) {
+        // 0.6s dramatic slow-mo close impact angle
+        const traumaSq = this.shakeTrauma * this.shakeTrauma;
+        const shakeX = traumaSq * (Math.sin(this.realTime * 41) * 0.32);
+        const shakeY = traumaSq * (Math.cos(this.realTime * 53) * 0.24);
+        _camTargetPos.set(this.playerX * 0.8 + shakeX, 2.25 + shakeY, 4.1);
+        this.camera.position.lerp(_camTargetPos, 1 - Math.exp(-10 * realDt));
+        _camLookAt.set(this.playerX, 0.9, -1.5);
+        this.camera.lookAt(_camLookAt);
+        this.camera.rotateZ(traumaSq * Math.sin(this.realTime * 35) * 0.06);
+      } else {
+        // 2.0s top-down orbit around the scene showing the converging crowd
+        const orbitT = this.crashCinematicTimer - 0.6;
+        const angle = orbitT * 1.5;
+        const radius = 7.4;
+        _camTargetPos.set(
+          this.playerX + Math.sin(angle) * radius,
+          11.2,
+          Math.cos(angle) * radius
+        );
+        this.camera.position.lerp(_camTargetPos, 1 - Math.exp(-5.5 * realDt));
+        _camLookAt.set(this.playerX, 0.6, 0);
+        this.camera.lookAt(_camLookAt);
+      }
+
+      if (this.crashCinematicTimer >= 2.6 && this.pendingGameOverSummary) {
+        const finalSummary = this.pendingGameOverSummary;
+        this.pendingGameOverSummary = null;
+        this.crashCinematicActive = false;
+        this.callbacks.onGameOver(finalSummary);
+      }
+      return;
+    }
+
     const slowDt = realDt * 0.28;
     const drift = this.playerSpeed * 0.18 * slowDt;
     this.updateDustPuffs(slowDt, drift);
@@ -3809,9 +4172,9 @@ export class GameEngine {
     const traumaSq = this.shakeTrauma * this.shakeTrauma;
     const shakeX = traumaSq * (Math.sin(this.realTime * 41) * 0.32);
     const shakeY = traumaSq * (Math.cos(this.realTime * 53) * 0.24);
-    _camTargetPos.set(this.playerX * 0.75 + shakeX, 4.95 + shakeY, 8.8);
+    _camTargetPos.set(this.playerX * 0.75 + shakeX, 3.2 + shakeY, 5.2);
     this.camera.position.lerp(_camTargetPos, 1 - Math.exp(-9 * realDt));
-    _camLookAt.set(this.playerX * 0.85, 1.25, -4.5);
+    _camLookAt.set(this.playerX * 0.85, 1.1, -3.5);
     this.camera.lookAt(_camLookAt);
     this.camera.rotateZ(traumaSq * Math.sin(this.realTime * 35) * 0.06);
   }
@@ -3834,7 +4197,10 @@ export class GameEngine {
       const simDt = realDt * timeScale;
       this.animTime += simDt;
       this.stepGameplay(simDt, realDt);
-    } else if (this.phase === 'gameover' && (this.gameoverImpactTimer > 0 || this.shakeTrauma > 0.01)) {
+    } else if (
+      this.phase === 'gameover' &&
+      (this.crashCinematicActive || this.gameoverImpactTimer > 0 || this.shakeTrauma > 0.01)
+    ) {
       this.stepGameOverImpact(realDt);
     } else if (this.phase === 'menu' || this.phase === 'garage') {
       this.animTime += realDt;
