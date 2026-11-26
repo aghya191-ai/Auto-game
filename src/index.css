@@ -226,23 +226,27 @@
 
 @keyframes floatWobble {
   0% {
-    transform: translate3d(-50%, 12px, 0) scale(0.65) rotate(-5deg);
+    transform: translate3d(-50%, 16px, 0) scale(0.5) rotate(-6deg);
     opacity: 0;
   }
-  20% {
-    transform: translate3d(-46%, -8px, 0) scale(1.18) rotate(4deg);
+  18% {
+    transform: translate3d(-44%, -22px, 0) scale(1.26) rotate(5deg);
     opacity: 1;
   }
-  50% {
-    transform: translate3d(-54%, -34px, 0) scale(1.04) rotate(-4deg);
+  36% {
+    transform: translate3d(-52%, -14px, 0) scale(0.96) rotate(-3deg);
     opacity: 1;
   }
-  80% {
-    transform: translate3d(-48%, -62px, 0) scale(0.98) rotate(3deg);
-    opacity: 0.9;
+  58% {
+    transform: translate3d(-48%, -48px, 0) scale(1.1) rotate(4deg);
+    opacity: 1;
+  }
+  82% {
+    transform: translate3d(-51%, -76px, 0) scale(0.98) rotate(-2deg);
+    opacity: 0.92;
   }
   100% {
-    transform: translate3d(-50%, -88px, 0) scale(0.85) rotate(-2deg);
+    transform: translate3d(-50%, -102px, 0) scale(0.84) rotate(2deg);
     opacity: 0;
   }
 }
@@ -287,6 +291,19 @@
 
 .animate-crash-flash {
   animation: crashFlash 260ms ease-out forwards;
+}
+
+@keyframes comboFlash {
+  0% {
+    opacity: 0.42;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-combo-flash {
+  animation: comboFlash 240ms ease-out forwards;
 }
 
 @keyframes stampSlam {
@@ -356,8 +373,9 @@
   .animate-combo-burst,
   .animate-crowd-shake,
   .animate-float-wobble,
-  .animate-screen-shake,
+    .animate-screen-shake,
   .animate-crash-flash,
+  .animate-combo-flash,
   .animate-stamp-slam,
   .animate-speed-lines,
   .animate-toast-pop {

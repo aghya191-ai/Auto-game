@@ -104,11 +104,14 @@ export default function App() {
   const [crashShakeActive, setCrashShakeActive] = useState(false);
   const [crashFlashKey, setCrashFlashKey] = useState(0);
   const [crashFlashActive, setCrashFlashActive] = useState(false);
+  const [comboFlashKey, setComboFlashKey] = useState(0);
+  const [comboFlashActive, setComboFlashActive] = useState(false);
 
   const areaBannerTimerRef = useRef<number>(0);
   const radioHideTimerRef = useRef<number>(0);
   const shakeResetTimerRef = useRef<number>(0);
   const flashResetTimerRef = useRef<number>(0);
+  const comboFlashResetTimerRef = useRef<number>(0);
   const comboTimerRef = useRef<number>(0);
   const toastHideTimerRef = useRef<number>(0);
   const toastQueueRef = useRef<GameEventToast[]>([]);
@@ -139,7 +142,17 @@ export default function App() {
   }, []);
 
   const bumpCombo = useCallback((delta = 1) => {
-    setComboCount((prev) => prev + delta);
+    setComboCount((prev) => {
+      const next = prev + delta;
+      engineRef.current?.sound.playCoinDing(next);
+      if (next >= 2) {
+        setComboFlashKey((k) => k + 1);
+        setComboFlashActive(true);
+        clearTimeout(comboFlashResetTimerRef.current);
+        comboFlashResetTimerRef.current = window.setTimeout(() => setComboFlashActive(false), 240);
+      }
+      return next;
+    });
     setComboBurstKey((k) => k + 1);
     clearTimeout(comboTimerRef.current);
     comboTimerRef.current = window.setTimeout(() => {
@@ -345,6 +358,11 @@ export default function App() {
           if (prevTakaRef.current >= 0 && takaGain >= 20) {
             pushFloatingPopup(`+৳${toBn(takaGain)}`, 'gain');
             bumpCombo(1);
+            try {
+              navigator.vibrate?.(16);
+            } catch {
+              // Ignore vibration errors
+            }
           }
           if (prevDamageRef.current >= 0 && dmgGain >= 150) {
             pushFloatingPopup(`+৳${toBn(dmgGain)} ক্ষতি!`, 'damage');
@@ -402,6 +420,7 @@ export default function App() {
       clearTimeout(radioHideTimerRef.current);
       clearTimeout(shakeResetTimerRef.current);
       clearTimeout(flashResetTimerRef.current);
+      clearTimeout(comboFlashResetTimerRef.current);
       clearTimeout(comboTimerRef.current);
       clearTimeout(toastHideTimerRef.current);
       engine.dispose();
@@ -676,6 +695,7 @@ export default function App() {
         missions: nextMissions,
       };
       savePlayerData(next);
+      engineRef.current?.sound.playCoinDing(2);
       pushToast({ text: `মিশন পুরস্কার +৳${toBn(gained)} পকেটে!`, tone: 'success', priority: 'level' });
       return next;
     });
@@ -685,6 +705,7 @@ export default function App() {
     setSave((prev) => {
       const result = claimDailyStreakBonus(prev);
       if (!result) return prev;
+      engineRef.current?.sound.playCoinDing(3);
       pushToast({
         text: `দিন ${toBn(result.updated.loginStreak)} স্ট্রিক বোনাস +৳${toBn(result.reward)} পকেটে!`,
         tone: 'success',
@@ -759,6 +780,18 @@ export default function App() {
           style={{
             background:
               'radial-gradient(circle at center, rgba(255,255,255,0.85) 0%, rgba(239,68,68,0.72) 70%, rgba(153,27,27,0.9) 100%)',
+          }}
+        />
+      )}
+
+      {/* Combo Gold Edge Flash Overlay */}
+      {comboFlashActive && (
+        <div
+          key={comboFlashKey}
+          className="animate-combo-flash pointer-events-none fixed inset-0 z-30"
+          style={{
+            background:
+              'radial-gradient(circle at center, rgba(254,240,138,0) 46%, rgba(250,204,21,0.46) 86%, rgba(236,72,153,0.52) 100%)',
           }}
         />
       )}
