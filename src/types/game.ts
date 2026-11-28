@@ -192,14 +192,21 @@ export interface HudSnapshot {
   distanceMeters: number;
   boosting: boolean;
   chasedCount: number;
+  hitCombo: number;
+  hitComboTimeLeft: number;
   inGasZone: boolean;
   inBribeZone: boolean;
+  bribeProgress: number;
+  bribeCost: number;
   passengerActive: boolean;
   passengerDestination: string;
   passengerFare: number;
   passengerDistLeft: number;
   passengerNearPickup: boolean;
   pickupProgress: number;
+  destinationName: string;
+  destinationDistLeft: number;
+  destinationFare: number;
   activeEvent: { kind: RandomEventKind; label: string; emoji: string; timeLeft: number } | null;
   cameraMode: CameraMode;
   steerDir: -1 | 0 | 1;
@@ -209,11 +216,19 @@ export interface HudSnapshot {
   aheadHazard: { label: string; sub: string; dist: number } | null;
   aheadTrafficLight: { state: TrafficLightState; dist: number; timeLeft: number } | null;
   rearHazard: string | null;
+  heavyLaneWarning: { kind: 'bus' | 'truck'; dist: number; direction: 'ahead' | 'behind' } | null;
   weather: WeatherCondition;
   atmosphereMode: AtmosphereMode;
   graphicsQuality: GraphicsQuality;
   soundBombCooldown: number;
   radarEntities: RadarEntity[];
+}
+
+export interface HitPopupEvent {
+  id: number;
+  amount: number;
+  combo: number;
+  label: string;
 }
 
 export interface GameOverSummary {
@@ -262,6 +277,7 @@ export interface RadioBroadcastClip {
 export interface FloatingMoneyPopup {
   id: number;
   text: string;
+  sub?: string;
   tone: 'gain' | 'damage';
   offsetX: number;
 }

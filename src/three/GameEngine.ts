@@ -16,6 +16,7 @@ import type {
   GameOverSummary,
   GamePhase,
   GraphicsQuality,
+  HitPopupEvent,
   HornSoundId,
   HudSnapshot,
   InputState,
@@ -32,6 +33,8 @@ import {
   createCngModel,
   createCockpitModel,
   createFlyoverPillar,
+  createHalfRoadBillboard,
+  createLaneFlyoverPillar,
   createOverheadRoadSign,
   createPedestrianModel,
   createProtestPlacard,
@@ -51,6 +54,7 @@ import {
   type PedestrianRig,
   type PedestrianStyle,
   type RoadDiggingRig,
+  type RoadObstacleRig,
   type SpeechCategory,
   type TrafficLightRig,
   type TrafficModelRig,
@@ -188,6 +192,16 @@ interface ZoneEntity {
   x: number;
   z: number;
   triggered: boolean;
+  bribeTimer: number;
+  bribeCost: number;
+  officerRig?: PedestrianRig;
+}
+
+interface RoadObstacleEntity {
+  rig: RoadObstacleRig;
+  x: number;
+  z: number;
+  hit: boolean;
 }
 
 interface WaitingPassengerEntity {
@@ -242,6 +256,7 @@ export interface EngineCallbacks {
   onGameOver: (summary: GameOverSummary) => void;
   onCrashJuice?: (intensity: 'minor' | 'major') => void;
   onCrashBurstText?: (text: string) => void;
+  onHitPopup?: (event: HitPopupEvent) => void;
 }
 
 export class GameEngine {
@@ -301,6 +316,7 @@ export class GameEngine {
   private traffic: TrafficEntity[] = [];
   private pedestrians: PedestrianEntity[] = [];
   private zones: ZoneEntity[] = [];
+  private roadObstacles: RoadObstacleEntity[] = [];
   private waitingPassengers: WaitingPassengerEntity[] = [];
   private stalls: StallEntity[] = [];
   private diggingBarriers: DiggingBarrierEntity[] = [];
@@ -355,13 +371,28 @@ export class GameEngine {
   private areaProgress = 0;
   private loopCount = 1;
 
-  // Passenger state
+  // Passenger & destination route state
   private passengerActive = false;
   private passengerDestination = '';
   private passengerFare = 0;
   private passengerDistLeft = 0;
   private passengerDropoffSpawned = false;
   private distanceSincePassenger = 0;
+  private destinationAreaIdx = 1;
+  private destinationName = AREAS[1].name;
+  private destinationDistLeft = 220;
+  private destinationFare = 400;
+
+  // Hit combo & escalating crowd pursuit state
+  private runElapsed = 0;
+  private crowdCount = 0;
+  private crowdSurroundTimer = 0;
+  private boostPushAccum = 0;
+  private roadsideChaseCooldown = 0;
+  private hitCombo = 0;
+  private hitComboTimer = 0;
+  private hitPopupSeq = 1;
+  private distanceSinceObstacle = 0;
 
   // Random events state (20-30s each)
   private activeEventKind: RandomEventKind | null = null;
@@ -1122,16 +1153,22 @@ export class GameEngine {
     this.sound.playTrafficHorn('heavy');
     this.callbacks.onMissionProgress('horns', 2);
 
-    // Clear agile cars out of player lane & scatter nearby pedestrians
+    // Push crowd back & reduce crowd count sharply
+    if (this.crowdCount > 0) {
+      const reduced = Math.max(4, Math.ceil(this.crowdCount * 0.45));
+      this.crowdCount = Math.max(0, this.crowdCount - reduced);
+    }
+
     let talkers = 0;
     for (const ped of this.pedestrians) {
       if (Math.abs(ped.z) < 35) {
         ped.isChasing = false;
         ped.rig.alertBadge.visible = false;
+        ped.z += ped.z >= -1 ? 8.5 : 0;
         if (ped.basePose !== 'sit_tea_stall' && ped.fallTimer <= 0) {
-          ped.jumpBackTimer = 0.65;
+          ped.jumpBackTimer = 0.78;
           ped.walkDir = ped.x >= this.playerX ? 1 : -1;
-          ped.walkSpeed = 8.5;
+          ped.walkSpeed = 9.0;
         }
         if (talkers < 3) {
           talkers++;
@@ -1150,7 +1187,7 @@ export class GameEngine {
       }
     }
     this.callbacks.onToast({
-      text: 'শব্দবোমা! রাস্তা থেকে সবাই ছিটকে সরেছে 💣',
+      text: 'শব্দবোমা! ভিড় পিছে সরেছে, রাস্তা ফাঁকা 💣',
       tone: 'warning',
     });
     this.emitHud();
@@ -1383,7 +1420,20 @@ export class GameEngine {
     this.passengerFare = 0;
     this.passengerDistLeft = 0;
     this.passengerDropoffSpawned = false;
-    this.distanceSincePassenger = 35;
+    this.distanceSincePassenger = 45;
+    this.destinationAreaIdx = (chosenArea + 1) % AREAS.length;
+    this.destinationName = AREAS[this.destinationAreaIdx].name;
+    this.destinationDistLeft = 220;
+    this.destinationFare = 420;
+
+    this.runElapsed = 0;
+    this.crowdCount = 0;
+    this.crowdSurroundTimer = 0;
+    this.boostPushAccum = 0;
+    this.roadsideChaseCooldown = 0.8;
+    this.hitCombo = 0;
+    this.hitComboTimer = 0;
+    this.distanceSinceObstacle = 20;
 
     this.activeEventKind = null;
     this.activeEventTimer = 0;
@@ -1409,12 +1459,12 @@ export class GameEngine {
     this.wasBoosting = false;
     this.wheelDustAccum = 0;
     this.soundBombCooldown = 0;
-    this.trafficSpawnTimer = 0.25;
-    this.jamCooldown = 12;
-    this.pedSpawnTimer = 0.6;
-    this.distanceSinceGasZone = 0;
-    this.distanceSinceBribeZone = 0;
-    this.distanceSinceTrafficLight = 60;
+    this.trafficSpawnTimer = 0.8;
+    this.jamCooldown = 15;
+    this.pedSpawnTimer = 0.7;
+    this.distanceSinceGasZone = 55;
+    this.distanceSinceBribeZone = 25;
+    this.distanceSinceTrafficLight = 75;
     this.boostMissionAccum = 0;
     this.distMissionAccum = 0;
 
@@ -1453,8 +1503,15 @@ export class GameEngine {
       if (p.propGroup) this.scene.remove(p.propGroup);
     }
     this.pedestrians = [];
-    for (const z of this.zones) this.scene.remove(z.group);
+    for (const z of this.zones) {
+      this.scene.remove(z.group);
+      if (z.officerRig) this.scene.remove(z.officerRig.group);
+    }
     this.zones = [];
+    for (const obs of this.roadObstacles) {
+      this.scene.remove(obs.rig.group);
+    }
+    this.roadObstacles = [];
     for (const wp of this.waitingPassengers) {
       this.scene.remove(wp.rig.group);
       this.scene.remove(wp.pad);
@@ -2166,11 +2223,144 @@ export class GameEngine {
     const padLabel = type === 'dropoff' ? this.passengerDestination || undefined : undefined;
     const pad = createZonePad(type, this.maxAnisotropy, padLabel);
     if (laneX < 0 && pad.children[1] && type !== 'dropoff') {
-      pad.children[1].position.x = -4.6;
+      // Flip kiosk to outer shoulder side on left carriageway
+      const kiosk = pad.children[pad.children.length - 1];
+      if (kiosk) kiosk.position.x = -4.1;
     }
     pad.position.set(laneX, 0, -145);
     this.scene.add(pad);
-    this.zones.push({ group: pad, type, x: laneX, z: -145, triggered: false });
+
+    let officerRig: PedestrianRig | undefined;
+    const bribeCost = Math.min(800, Math.max(250, this.crowdCount * 60 + 200));
+    if (type === 'bribe') {
+      officerRig = createPedestrianModel({
+        style: 'traffic_police',
+        maxAnisotropy: this.maxAnisotropy,
+      });
+      const sideSign = laneX >= 0 ? 1 : -1;
+      officerRig.group.position.set(laneX + sideSign * 2.9, 0, -145);
+      officerRig.group.rotation.y = sideSign === 1 ? -Math.PI / 2 : Math.PI / 2;
+      officerRig.showSpeech('bribe');
+      officerRig.setDetailed(true);
+      this.scene.add(officerRig.group);
+    }
+
+    this.zones.push({
+      group: pad,
+      type,
+      x: laneX,
+      z: -145,
+      triggered: false,
+      bribeTimer: 0,
+      bribeCost,
+      officerRig,
+    });
+  }
+
+  private spawnRoadObstacle(): void {
+    if (this.roadObstacles.length >= 4) return;
+    const isBillboard = Math.random() < 0.52;
+    const laneX = isBillboard
+      ? Math.random() < 0.72
+        ? 4.4
+        : -4.4
+      : [2.8, 6.0, -2.8][Math.floor(Math.random() * 3)];
+    const z = -148;
+
+    // Avoid spawning directly inside an active zone or traffic light
+    if (this.zones.some((zn) => Math.abs(zn.z - z) < 18)) return;
+    if (this.trafficLights.some((tl) => Math.abs(tl.z - z) < 20)) return;
+
+    const rig = isBillboard
+      ? createHalfRoadBillboard(Math.floor(Math.random() * 6), this.maxAnisotropy)
+      : createLaneFlyoverPillar(Math.floor(Math.random() * 8), this.maxAnisotropy);
+    rig.group.position.set(laneX, 0, z);
+    this.scene.add(rig.group);
+    this.roadObstacles.push({ rig, x: laneX, z, hit: false });
+  }
+
+  private nextEscalatingCrowdDelta(current: number): number {
+    if (current < 1) return 1;
+    if (current < 3) return 2;
+    if (current < 5) return 2;
+    if (current < 8) return 3;
+    if (current < 13) return 5;
+    return 6;
+  }
+
+  private spawnRoadsideChaser(nearZ?: number): void {
+    if (this.pedestrians.length >= 46) return;
+    const activeChasers = this.pedestrians.filter((p) => p.isChasing).length;
+    if (activeChasers >= 18) return;
+
+    const side: -1 | 1 = Math.random() < 0.5 ? -1 : 1;
+    const px = side * 9.25;
+    const pz = nearZ ?? -6 - Math.random() * 18;
+    const styles: PedestrianStyle[] = ['lungi_shirt', 'panjabi', 'rickshaw_puller', 'office_wear', 'vendor'];
+    const rig = createPedestrianModel({
+      style: styles[Math.floor(Math.random() * styles.length)],
+      maxAnisotropy: this.maxAnisotropy,
+    });
+    rig.group.position.set(px, 0.2, pz);
+    rig.alertBadge.visible = true;
+    rig.showSpeech('crash');
+    this.scene.add(rig.group);
+
+    this.pedestrians.push({
+      rig,
+      x: px,
+      z: pz,
+      baseY: 0.2,
+      walkDir: -side,
+      walkSpeed: 4.5,
+      basePose: 'run',
+      isChasing: true,
+      canCollide: true,
+      hitCooldown: 0.4,
+      animPhase: Math.random() * Math.PI * 2,
+      jumpBackTimer: 0,
+      fallTimer: 0,
+      speechTimer: 2.0,
+      reactYaw: Math.atan2(this.playerX - px, -pz),
+      reactTimer: 2.0,
+    });
+  }
+
+  private registerChaosHit(
+    baseAmount: number,
+    crowdMode: 'small' | 'big' | 'none',
+    label: string
+  ): number {
+    this.hitCombo = this.hitComboTimer > 0 ? Math.min(8, this.hitCombo + 1) : 1;
+    this.hitComboTimer = 3.0;
+    const mult = 1 + (this.hitCombo - 1) * 0.65;
+    const amount = Math.round((baseAmount * mult) / 50) * 50;
+
+    this.nationalDamage += amount;
+    this.score += Math.round(amount * 0.14);
+    this.runTaka += Math.max(30, Math.round(amount * 0.06));
+    this.sound.playCoinDing(this.hitCombo);
+
+    if (crowdMode === 'small') {
+      this.crowdCount += this.nextEscalatingCrowdDelta(this.crowdCount);
+    } else if (crowdMode === 'big') {
+      this.crowdCount += 4 + Math.floor(Math.random() * 3);
+    }
+
+    const activeChasers = this.pedestrians.filter((p) => p.isChasing).length;
+    const targetVisualChasers = Math.min(18, this.crowdCount);
+    const needed = Math.min(crowdMode === 'big' ? 4 : 2, Math.max(0, targetVisualChasers - activeChasers));
+    for (let k = 0; k < needed; k++) {
+      this.spawnRoadsideChaser(-4 - Math.random() * 14);
+    }
+
+    this.callbacks.onHitPopup?.({
+      id: this.hitPopupSeq++,
+      amount,
+      combo: this.hitCombo,
+      label,
+    });
+    return amount;
   }
 
   private startRandomEvent(): void {
@@ -2407,29 +2597,63 @@ export class GameEngine {
 
     this.emitHud();
 
-    // Crash Cinematic (0.6s slow-mo + "ধপাস!" + 2.0s top-down orbit showing converging crowd)
-    if (reason === 'bus' || reason === 'truck' || reason === 'pedestrian') {
-      this.crashCinematicActive = true;
-      this.crashCinematicTimer = 0;
-      this.gameoverImpactTimer = 2.65;
-      this.pendingGameOverSummary = summary;
-      this.triggerCrowdReaction(this.playerX, 0, 'crash', 6);
-      this.callbacks.onCrashBurstText?.('ধপাস!');
-      return;
+    // Crash Cinematic (0.6s slow-mo + red flash + comic burst + crowd surrounds CNG + 2.0s top-down orbit)
+    const nearbyCount = this.pedestrians.filter((p) => Math.abs(p.z) < 16).length;
+    const spawnNeeded = Math.max(0, 8 - nearbyCount);
+    for (let k = 0; k < spawnNeeded; k++) {
+      const ang = (k / Math.max(1, spawnNeeded)) * Math.PI * 2;
+      const dist = 5.5 + Math.random() * 3.5;
+      const px = THREE.MathUtils.clamp(this.playerX + Math.cos(ang) * dist, -9.2, 9.2);
+      const pz = Math.sin(ang) * dist;
+      const rig = createPedestrianModel({
+        style: pickRandomPedestrianStyle(),
+        maxAnisotropy: this.maxAnisotropy,
+      });
+      rig.group.position.set(px, Math.abs(px) >= 8.65 ? 0.2 : 0, pz);
+      rig.alertBadge.visible = true;
+      rig.showSpeech('crash');
+      this.scene.add(rig.group);
+      this.pedestrians.push({
+        rig,
+        x: px,
+        z: pz,
+        baseY: Math.abs(px) >= 8.65 ? 0.2 : 0,
+        walkDir: 0,
+        walkSpeed: 4,
+        basePose: 'run',
+        isChasing: true,
+        canCollide: false,
+        hitCooldown: 0,
+        animPhase: Math.random() * Math.PI * 2,
+        jumpBackTimer: 0,
+        fallTimer: 0,
+        speechTimer: 3,
+        reactYaw: 0,
+        reactTimer: 3,
+      });
     }
 
-    this.gameoverImpactTimer = 0.55;
-    this.callbacks.onGameOver(summary);
+    const burstChoices = ['ধপাস!', 'ঠাস!', 'টিসুম!'];
+    const burstText = burstChoices[Math.floor(Math.random() * burstChoices.length)];
+    this.crashCinematicActive = true;
+    this.crashCinematicTimer = 0;
+    this.gameoverImpactTimer = 2.65;
+    this.pendingGameOverSummary = summary;
+    this.triggerCrowdReaction(this.playerX, 0, 'crash', 8);
+    this.callbacks.onCrashBurstText?.(burstText);
   }
 
   private emitHud(): void {
     const area = AREAS[this.areaIndex];
     const inGas = this.zones.some(
-      (z) => z.type === 'gas' && Math.abs(z.z) < 6 && Math.abs(z.x - this.playerX) < 3.1
+      (z) => z.type === 'gas' && Math.abs(z.z) < 6 && Math.abs(z.x - this.playerX) < 3.2
     );
-    const inBribe = this.zones.some(
-      (z) => z.type === 'bribe' && Math.abs(z.z) < 6 && Math.abs(z.x - this.playerX) < 3.1
+    const activeBribeZone = this.zones.find(
+      (z) => z.type === 'bribe' && !z.triggered && Math.abs(z.z) < 6 && Math.abs(z.x - this.playerX) < 3.2
     );
+    const inBribe = Boolean(activeBribeZone);
+    const bribeProgress = activeBribeZone ? Math.min(1, activeBribeZone.bribeTimer / 2.0) : 0;
+    const bribeCost = activeBribeZone ? activeBribeZone.bribeCost : 0;
     const nearPickup = this.waitingPassengers.some(
       (wp) => !wp.pickedUp && wp.z > -32 && wp.z < 6
     );
@@ -2446,8 +2670,20 @@ export class GameEngine {
       }
     }
 
-    // Nearest blocking heavy vehicle or road-digging barrier ahead in player's path
+    // Nearest blocking vehicle, half-road billboard, flyover pillar, or road-digging barrier ahead
     let aheadHazard: { label: string; sub: string; dist: number } | null = null;
+    for (const obs of this.roadObstacles) {
+      if (!obs.hit && obs.z < -3 && obs.z > -75 && Math.abs(obs.x - this.playerX) < obs.rig.halfWidth + 1.1) {
+        const d = Math.round(Math.abs(obs.z));
+        if (!aheadHazard || d < aheadHazard.dist) {
+          aheadHazard = {
+            label: obs.rig.kind === 'billboard' ? 'অবরোধ (বোর্ড)' : 'অবরোধ (পিলার)',
+            sub: 'লেন বদলান!',
+            dist: d,
+          };
+        }
+      }
+    }
     for (const t of this.traffic) {
       if (t.z < -4 && t.z > -65 && Math.abs(t.x - this.playerX) < 2.2) {
         const d = Math.round(Math.abs(t.z));
@@ -2469,11 +2705,27 @@ export class GameEngine {
         const d = Math.round(Math.abs(b.z));
         if (!aheadHazard || d < aheadHazard.dist) {
           aheadHazard = {
-            label: 'রাস্তা খোঁড়া!',
+            label: 'অবরোধ (খোঁড়া)',
             sub: 'লেন বদলান!',
             dist: d,
           };
         }
+      }
+    }
+
+    // Same-lane bus or truck within 40 m -> pulsing red warning bar at bottom of screen
+    let heavyLaneWarning: { kind: 'bus' | 'truck'; dist: number; direction: 'ahead' | 'behind' } | null =
+      null;
+    for (const t of this.traffic) {
+      if ((t.kind !== 'bus' && t.kind !== 'truck') || t.isVipConvoy) continue;
+      if (Math.abs(t.x - this.playerX) > 1.85) continue;
+      const dist = Math.round(Math.abs(t.z));
+      if (dist <= 40 && (!heavyLaneWarning || dist < heavyLaneWarning.dist)) {
+        heavyLaneWarning = {
+          kind: t.kind,
+          dist,
+          direction: t.z <= 0 ? 'ahead' : 'behind',
+        };
       }
     }
 
@@ -2543,6 +2795,15 @@ export class GameEngine {
         });
       }
     }
+    for (const obs of this.roadObstacles) {
+      if (!obs.hit && obs.z > -95 && obs.z < 40) {
+        radarEntities.push({
+          dx: obs.x - this.playerX,
+          dz: obs.z,
+          kind: 'hazard',
+        });
+      }
+    }
     for (const t of this.traffic) {
       if (t.z > -90 && t.z < 40) {
         radarEntities.push({
@@ -2579,6 +2840,16 @@ export class GameEngine {
       }
     }
 
+    // Active route destination pin on minimap (if no dropoff pad already closer)
+    const activeDestDist = this.passengerActive ? this.passengerDistLeft : this.destinationDistLeft;
+    if (!radarEntities.some((e) => e.kind === 'dropoff')) {
+      radarEntities.push({
+        dx: 4.2 - this.playerX,
+        dz: -Math.min(82, Math.max(12, activeDestDist * 0.45)),
+        kind: 'dropoff',
+      });
+    }
+
     const activeEventCfg = this.activeEventKind ? RANDOM_EVENTS[this.activeEventKind] : null;
 
     let pickupProgress = 0;
@@ -2587,6 +2858,9 @@ export class GameEngine {
         pickupProgress = Math.max(pickupProgress, Math.min(1, wp.boardTimer / 1.5));
       }
     }
+
+    const visualChasers = this.pedestrians.filter((p) => p.isChasing).length;
+    const displayCrowd = Math.max(this.crowdCount, visualChasers);
 
     this.callbacks.onHudUpdate({
       score: Math.round(this.score),
@@ -2602,15 +2876,22 @@ export class GameEngine {
       loopCount: this.loopCount,
       distanceMeters: Math.round(this.distanceMeters),
       boosting: Boolean(this.input.boost && this.gas > 2 && this.playerSpeed > 10),
-      chasedCount: this.pedestrians.filter((p) => p.isChasing).length,
+      chasedCount: displayCrowd,
+      hitCombo: this.hitCombo,
+      hitComboTimeLeft: this.hitComboTimer,
       inGasZone: inGas,
       inBribeZone: inBribe,
+      bribeProgress,
+      bribeCost,
       passengerActive: this.passengerActive,
       passengerDestination: this.passengerActive ? this.passengerDestination : '',
       passengerFare: this.passengerFare,
       passengerDistLeft: Math.max(0, Math.round(this.passengerDistLeft)),
       passengerNearPickup: nearPickup,
       pickupProgress,
+      destinationName: this.passengerActive ? this.passengerDestination : this.destinationName,
+      destinationDistLeft: Math.max(0, Math.round(activeDestDist)),
+      destinationFare: this.passengerActive ? this.passengerFare : this.destinationFare,
       activeEvent: activeEventCfg
         ? {
             kind: activeEventCfg.kind,
@@ -2627,6 +2908,7 @@ export class GameEngine {
       aheadHazard,
       aheadTrafficLight,
       rearHazard,
+      heavyLaneWarning,
       weather: this.weather,
       atmosphereMode: this.atmosphereMode,
       graphicsQuality: this.graphicsQuality,
@@ -2831,6 +3113,8 @@ export class GameEngine {
   private stepGameplay(dt: number, realDt: number): void {
     const area = AREAS[this.areaIndex];
     const loopMult = 1 + (this.loopCount - 1) * 0.22;
+    this.runElapsed += dt;
+    const rampSpeedMult = this.runElapsed < 10 ? 0.92 : this.runElapsed < 25 ? 1.0 : 1.1;
 
     if (this.invulnTimer > 0) this.invulnTimer -= dt;
     if (this.dividerCooldown > 0) this.dividerCooldown -= dt;
@@ -2840,6 +3124,10 @@ export class GameEngine {
     if (this.soundBombCooldown > 0) this.soundBombCooldown = Math.max(0, this.soundBombCooldown - realDt);
     if (this.trafficHornCooldown > 0) this.trafficHornCooldown -= realDt;
     if (this.gasZoneSoundCooldown > 0) this.gasZoneSoundCooldown -= realDt;
+    if (this.hitComboTimer > 0) {
+      this.hitComboTimer = Math.max(0, this.hitComboTimer - realDt);
+      if (this.hitComboTimer <= 0) this.hitCombo = 0;
+    }
 
     // Random weather cycling during gameplay
     this.weatherTimer -= dt;
@@ -2871,8 +3159,9 @@ export class GameEngine {
       (boosting ? 50 : 35) *
       engineMult *
       Math.min(1.35, 1 + (this.loopCount - 1) * 0.08) *
-      weatherSpeedMult;
-    let targetSpeed = 14 * weatherSpeedMult;
+      weatherSpeedMult *
+      rampSpeedMult;
+    let targetSpeed = 14.5 * weatherSpeedMult * rampSpeedMult;
     if (this.input.up || boosting) targetSpeed = maxSpeed;
     else if (this.input.down) targetSpeed = 0;
 
@@ -2999,8 +3288,31 @@ export class GameEngine {
       }
     }
 
-    const chasedNow = this.pedestrians.filter((p) => p.isChasing).length;
+    const chasedNow = Math.max(this.crowdCount, this.pedestrians.filter((p) => p.isChasing).length);
     this.sound.updateEngine(Math.min(1.15, this.playerSpeed / 38), boosting, true, chasedNow);
+
+    // Boosting ("টান") pushes chasing crowd back and sheds trailing crowd over sustained boost
+    if (boosting && this.crowdCount > 0) {
+      this.boostPushAccum += dt;
+      if (this.boostPushAccum >= 1.35) {
+        this.boostPushAccum = 0;
+        this.crowdCount = Math.max(0, this.crowdCount - 1);
+      }
+    } else {
+      this.boostPushAccum = 0;
+    }
+
+    // Active roadside crowd chases ramp in after 20 seconds
+    if (this.runElapsed >= 20 && this.crowdCount > 0) {
+      this.roadsideChaseCooldown -= dt;
+      if (this.roadsideChaseCooldown <= 0) {
+        this.roadsideChaseCooldown = Math.max(0.85, 2.4 - this.crowdCount * 0.08);
+        const visualChasers = this.pedestrians.filter((p) => p.isChasing).length;
+        if (visualChasers < Math.min(18, this.crowdCount)) {
+          this.spawnRoadsideChaser(-6 - Math.random() * 14);
+        }
+      }
+    }
 
     const distStep = this.playerSpeed * dt;
     this.distanceMeters += distStep;
@@ -3009,10 +3321,33 @@ export class GameEngine {
     this.distanceSinceBribeZone += distStep;
     this.distanceSincePassenger += distStep;
     this.distanceSinceTrafficLight += distStep;
+    this.distanceSinceObstacle += distStep;
 
     const wrongWayMult = this.playerX < -0.55 ? 1.5 : 1.0;
     this.score += distStep * (boosting ? 1.8 : 1.0) * loopMult * wrongWayMult;
-    this.runTaka += distStep * 0.14 * (wrongWayMult > 1 ? 1.25 : 1.0);
+
+    // Destination loop tracking (chip near minimap + route line -> fare bonus + new destination)
+    if (!this.passengerActive) {
+      this.destinationDistLeft -= distStep;
+      if (this.destinationDistLeft <= 0) {
+        const earned = this.destinationFare;
+        const reachedName = this.destinationName;
+        this.runTaka += earned;
+        this.score += 240;
+        this.sound.playFare();
+        this.vibrate(22);
+        this.callbacks.onDriverXpGain?.(120);
+        this.callbacks.onToast({
+          text: `গন্তব্য ${reachedName} পৌঁছেছেন! ভাড়া বোনাস +৳${toBn(earned)} 💵`,
+          tone: 'success',
+          priority: 'gas',
+        });
+        this.destinationAreaIdx = (this.destinationAreaIdx + 1) % AREAS.length;
+        this.destinationName = AREAS[this.destinationAreaIdx].name;
+        this.destinationDistLeft = 200 + Math.round(Math.random() * 65);
+        this.destinationFare = 320 + Math.round(this.destinationDistLeft * 1.45);
+      }
+    }
 
     this.distMissionAccum += distStep;
     if (this.distMissionAccum >= 25) {
@@ -3044,11 +3379,11 @@ export class GameEngine {
     // Smooth dusty sky dome, horizon smog, tight CNG shadow tracking, road wetness & rain
     this.updateAtmosphereAndLighting(dt);
 
-    // Gas consumption (gentle idle drain when stopped at red light)
+    // Battery/Gas consumption (slow drain; yellow zones charge rapidly)
     const gasDrain =
       (this.playerSpeed < 1.0
-        ? 0.35
-        : (boosting ? 4.6 : 1.95) * (1 + (this.loopCount - 1) * 0.12)) * tankDrainMult;
+        ? 0.25
+        : (boosting ? 4.1 : 1.55) * (1 + (this.loopCount - 1) * 0.1)) * tankDrainMult;
     this.gas -= gasDrain * dt;
     if (this.gas <= 0) {
       this.gas = 0;
@@ -3066,6 +3401,39 @@ export class GameEngine {
         if (chunk.builtAreaIndex !== this.areaIndex) {
           this.rebuildChunkScenery(chunk, idx + Math.floor(this.distanceMeters / 45));
         }
+        // Spawn pedestrians crossing on zebra crossing chunks
+        if (!chunk.hasDivider && this.pedestrians.length < 40) {
+          const zebraCount = 2;
+          for (let zp = 0; zp < zebraCount; zp++) {
+            const side: -1 | 1 = zp % 2 === 0 ? -1 : 1;
+            const rig = createPedestrianModel({
+              style: pickRandomPedestrianStyle(),
+              maxAnisotropy: this.maxAnisotropy,
+            });
+            const px = side * (7.8 + Math.random() * 1.1);
+            const pz = chunk.z - 6 + zp * 4;
+            rig.group.position.set(px, 0, pz);
+            this.scene.add(rig.group);
+            this.pedestrians.push({
+              rig,
+              x: px,
+              z: pz,
+              baseY: 0,
+              walkDir: -side,
+              walkSpeed: 2.5 + Math.random() * 1.1,
+              basePose: 'cross_unaware',
+              isChasing: false,
+              canCollide: true,
+              hitCooldown: 0,
+              animPhase: Math.random() * Math.PI * 2,
+              jumpBackTimer: 0,
+              fallTimer: 0,
+              speechTimer: 0,
+              reactYaw: Math.PI,
+              reactTimer: 0,
+            });
+          }
+        }
       }
       chunk.group.position.z = chunk.z;
 
@@ -3075,7 +3443,7 @@ export class GameEngine {
         const divMaxZ = chunk.hasDivider ? chunk.z + 16 : chunk.z + 20;
         if (0 >= divMinZ && 0 <= divMaxZ && Math.abs(this.playerX) < 1.05) {
           this.dividerCooldown = 0.45;
-          this.nationalDamage += 200;
+          const dmgMoney = this.registerChaosHit(300, 'none', 'ডিভাইডার!');
           this.shakeTimer = 0.2;
           this.shakeTrauma = Math.max(this.shakeTrauma, 0.56);
           this.vibrate([30, 20, 30]);
@@ -3087,7 +3455,7 @@ export class GameEngine {
           this.sound.playCrash(false);
           this.triggerCrowdReaction(this.playerX, 0, 'violation', 0);
           this.callbacks.onToast({
-            text: 'ডিভাইডারে ঘষা! জাতীয় ক্ষতি +৳২০০',
+            text: `ডিভাইডারে ঘষা! +৳${toBn(dmgMoney)}`,
             tone: 'danger',
           });
         }
@@ -3106,8 +3474,67 @@ export class GameEngine {
       }
     }
 
+    // Half-Road Billboards & Flyover/Footbridge Pillars in Lane
+    if (this.runElapsed > 9 && this.distanceSinceObstacle > 85) {
+      this.distanceSinceObstacle = 0;
+      this.spawnRoadObstacle();
+    }
+    for (let i = this.roadObstacles.length - 1; i >= 0; i--) {
+      const obs = this.roadObstacles[i];
+      obs.z += distStep;
+      obs.rig.group.position.z = obs.z;
+
+      const hitX = Math.abs(obs.x - this.playerX) < obs.rig.halfWidth + 0.65;
+      const hitZ = Math.abs(obs.z) < obs.rig.halfLength + 1.25;
+      if (!obs.hit && hitX && hitZ && this.invulnTimer <= 0) {
+        obs.hit = true;
+        const baseHit = obs.rig.kind === 'billboard' ? 800 : 750;
+        const dmgMoney = this.registerChaosHit(
+          baseHit,
+          'small',
+          obs.rig.kind === 'billboard' ? 'বোর্ড ভাঙা!' : 'পিলারে ধাক্কা!'
+        );
+        const hpLoss = Math.round(14 * chassisDmgMult);
+        this.hp -= hpLoss;
+        this.invulnTimer = 0.7;
+        this.shakeTimer = 0.34;
+        this.shakeTrauma = Math.max(this.shakeTrauma, 0.8);
+        this.triggerCrashSlowMo(0.28);
+        this.playerSpeed = Math.max(8, this.playerSpeed * 0.55);
+        this.playerX = THREE.MathUtils.clamp(
+          this.playerX + (this.playerX >= obs.x ? 1.5 : -1.5),
+          -7.4,
+          7.4
+        );
+        this.spawnDustBurst(obs.x, 0.3, obs.z, 10);
+        this.spawnDebrisBurst(obs.x, 0.85, obs.z, 14, 1.15);
+        this.sound.playCrash(true);
+        this.vibrate([45, 25, 50]);
+        this.callbacks.onCrashJuice?.('minor');
+        this.triggerCrowdReaction(obs.x, obs.z, 'crash', 1);
+        this.callbacks.onToast({
+          text:
+            obs.rig.kind === 'billboard'
+              ? `অবরোধ বোর্ডে ধাক্কা! +৳${toBn(dmgMoney)}`
+              : `পিলারে ধাক্কা! +৳${toBn(dmgMoney)}`,
+          tone: 'danger',
+          priority: 'crash',
+        });
+        if (this.hp <= 0) {
+          this.hp = 0;
+          this.handleGameOver('pedestrian');
+          return;
+        }
+      }
+
+      if (obs.z > 24) {
+        this.scene.remove(obs.rig.group);
+        this.roadObstacles.splice(i, 1);
+      }
+    }
+
     // Passenger Pickup (dotted white ring + 1.5s hold inside) & Drop-off
-    if (!this.passengerActive && this.distanceSincePassenger > 85 && this.waitingPassengers.length === 0) {
+    if (!this.passengerActive && this.distanceSincePassenger > 68 && this.waitingPassengers.length === 0) {
       this.distanceSincePassenger = 0;
       this.spawnWaitingPassenger();
     }
@@ -3127,11 +3554,11 @@ export class GameEngine {
         showPickupRing = true;
       }
 
-      const nearSide = Math.abs(wp.x - this.playerX) < 3.9 && Math.abs(wp.z) < 5.6;
-      if (!wp.pickedUp && nearSide && this.playerSpeed < 4.5) {
+      const nearSide = Math.abs(wp.x - this.playerX) < 4.2 && Math.abs(wp.z) < 6.0;
+      if (!wp.pickedUp && nearSide && this.playerSpeed < 7.5) {
         wp.boardTimer += dt;
       } else {
-        wp.boardTimer = Math.max(0, wp.boardTimer - dt * 1.5);
+        wp.boardTimer = Math.max(0, wp.boardTimer - dt * 1.4);
       }
       bestBoardProgress = Math.max(bestBoardProgress, Math.min(1, wp.boardTimer / 1.5));
 
@@ -3139,8 +3566,8 @@ export class GameEngine {
         wp.pickedUp = true;
         this.passengerActive = true;
         this.passengerDestination = wp.destination;
-        this.passengerDistLeft = 150 + Math.random() * 110;
-        this.passengerFare = 130 + Math.round(this.passengerDistLeft * 0.65);
+        this.passengerDistLeft = 140 + Math.random() * 90;
+        this.passengerFare = 220 + Math.round(this.passengerDistLeft * 1.15);
         this.passengerDropoffSpawned = false;
         this.sound.playPickup();
         this.callbacks.onToast({
@@ -3199,7 +3626,7 @@ export class GameEngine {
         st.group.visible = false;
         const stallHpLoss = Math.round(6 * chassisDmgMult);
         this.hp -= stallHpLoss;
-        this.nationalDamage += 350;
+        const dmgMoney = this.registerChaosHit(350, 'small', 'দোকান ভাঙা!');
         this.shakeTimer = 0.25;
         this.shakeTrauma = Math.max(this.shakeTrauma, 0.55);
         this.playerSpeed = Math.max(8, this.playerSpeed * 0.75);
@@ -3210,7 +3637,7 @@ export class GameEngine {
         this.callbacks.onCrashJuice?.('minor');
         this.triggerCrowdReaction(st.x, st.z, 'crash', 1);
         this.callbacks.onToast({
-          text: 'ফলের দোকান ভেঙেছে! ক্রেট-ফল ছড়িয়ে গেছে 🥭📦',
+          text: `ফলের দোকান ভেঙেছে! +৳${toBn(dmgMoney)} 🥭📦`,
           tone: 'danger',
           priority: 'crash',
         });
@@ -3307,7 +3734,7 @@ export class GameEngine {
         b.hit = true;
         const hpLoss = Math.round(14 * chassisDmgMult);
         this.hp -= hpLoss;
-        this.nationalDamage += 450;
+        const dmgMoney = this.registerChaosHit(450, 'small', 'রাস্তা খোঁড়া!');
         this.invulnTimer = 0.75;
         this.shakeTimer = 0.34;
         this.shakeTrauma = Math.max(this.shakeTrauma, 0.8);
@@ -3319,7 +3746,7 @@ export class GameEngine {
         this.vibrate([45, 25, 50]);
         this.callbacks.onCrashJuice?.('minor');
         this.callbacks.onToast({
-          text: `🚧 রাস্তা খোঁড়ায় ধাক্কা! -${toBn(hpLoss)} HP ও ক্ষতি +৳৪৫০`,
+          text: `🚧 রাস্তা খোঁড়ায় ধাক্কা! +৳${toBn(dmgMoney)}`,
           tone: 'danger',
           priority: 'crash',
         });
@@ -3336,12 +3763,12 @@ export class GameEngine {
       }
     }
 
-    // Spawn Yellow Gas / Pink Bribe Zones
-    if (this.distanceSinceGasZone > (this.gas < 38 ? 110 : 190)) {
+    // Spawn Yellow Charging / Pink Bribe Zones
+    if (this.distanceSinceGasZone > (this.gas < 45 ? 105 : 165)) {
       this.distanceSinceGasZone = 0;
       this.spawnZone('gas');
     }
-    if (this.distanceSinceBribeZone > (this.wanted >= 2 ? 145 : 235)) {
+    if (this.distanceSinceBribeZone > (this.crowdCount >= 5 || this.wanted >= 2 ? 145 : 225)) {
       this.distanceSinceBribeZone = 0;
       this.spawnZone('bribe');
     }
@@ -3350,41 +3777,61 @@ export class GameEngine {
       const z = this.zones[i];
       z.z += distStep;
       z.group.position.z = z.z;
+      if (z.officerRig) {
+        const sideSign = z.x >= 0 ? 1 : -1;
+        z.officerRig.group.position.set(z.x + sideSign * 2.9, 0, z.z);
+        z.officerRig.applyPose('wave', this.animTime * 6.5);
+      }
 
-      const onPad = Math.abs(z.z) < 5.6 && Math.abs(z.x - this.playerX) < 3.2;
+      const onPad = Math.abs(z.z) < 5.8 && Math.abs(z.x - this.playerX) < 3.2;
       if (onPad) {
         if (z.type === 'gas') {
-          this.gas = Math.min(100, this.gas + 48 * tankRefillMult * dt);
+          const chargeRate = this.playerSpeed < 6 ? 60 : 20;
+          this.gas = Math.min(100, this.gas + chargeRate * tankRefillMult * dt);
           if (this.gasZoneSoundCooldown <= 0) {
             this.sound.playGasRefill();
             this.gasZoneSoundCooldown = 0.55;
           }
           if (!z.triggered) {
             z.triggered = true;
-            this.callbacks.onToast({ text: 'হলুদ জোন: সিএনজি গ্যাস ভরছে! ⛽', tone: 'warning' });
+            this.callbacks.onToast({ text: 'হলুদ জোন: চার্জ হচ্ছে! ⚡', tone: 'warning' });
             this.callbacks.onMissionProgress('gas_refills', 1);
           }
         } else if (z.type === 'bribe' && !z.triggered) {
-          z.triggered = true;
-          this.sound.playBribe();
-          if (this.wanted > 0) {
-            this.wanted = Math.max(0, this.wanted - 2);
-            const fee = Math.min(Math.round(this.runTaka), 50);
+          if (this.playerSpeed < 6.0) {
+            z.bribeTimer += dt;
+          } else {
+            z.bribeTimer = Math.max(0, z.bribeTimer - dt * 0.8);
+          }
+          if (z.bribeTimer >= 2.0) {
+            z.triggered = true;
+            this.sound.playBribe();
+            const fee = Math.min(Math.round(this.runTaka), z.bribeCost);
             this.runTaka -= fee;
+            this.wanted = Math.max(0, this.wanted - 3);
+            const prevCrowd = this.crowdCount;
+            this.crowdCount = Math.max(0, Math.floor(prevCrowd * 0.25) - 2);
+            // Calm excess 3D chasers back to normal pedestrians
+            let keepChasers = Math.min(18, this.crowdCount);
+            for (const ped of this.pedestrians) {
+              if (!ped.isChasing) continue;
+              if (keepChasers > 0) {
+                keepChasers--;
+              } else {
+                ped.isChasing = false;
+                ped.rig.alertBadge.visible = false;
+              }
+            }
             this.callbacks.onToast({
               text:
                 fee > 0
-                  ? `গোলাপি জোন: ৳${toBn(fee)} চা-পানি! ওয়ান্টেড কমেছে ☕`
-                  : 'গোলাপি জোন: বাকি খাতায় চা-পানি! ওয়ান্টেড কমেছে ☕',
+                  ? `গোলাপি জোন: ৳${toBn(fee)} চা-পানি! ভিড় শান্ত হয়েছে ☕`
+                  : 'গোলাপি জোন: পুলিশকে চা-পানি! ভিড় অনেক কমেছে ☕',
               tone: 'pink',
+              priority: 'gas',
             });
-          } else {
-            this.callbacks.onToast({
-              text: 'গোলাপি জোন: পুলিশকে সালাম দিয়ে পার! ☕',
-              tone: 'pink',
-            });
+            this.callbacks.onMissionProgress('bribes', 1);
           }
-          this.callbacks.onMissionProgress('bribes', 1);
         } else if (z.type === 'dropoff' && !z.triggered && this.passengerActive && this.playerSpeed < 19) {
           z.triggered = true;
           const destLabel = this.passengerDestination;
@@ -3400,7 +3847,14 @@ export class GameEngine {
           });
           this.callbacks.onMissionProgress('passengers', 1);
           this.callbacks.onDriverXpGain?.(180);
+          // Assign next route destination immediately
+          this.destinationAreaIdx = (this.destinationAreaIdx + 1) % AREAS.length;
+          this.destinationName = AREAS[this.destinationAreaIdx].name;
+          this.destinationDistLeft = 200 + Math.round(Math.random() * 65);
+          this.destinationFare = 320 + Math.round(this.destinationDistLeft * 1.45);
         }
+      } else if (z.type === 'bribe' && !z.triggered && z.bribeTimer > 0) {
+        z.bribeTimer = Math.max(0, z.bribeTimer - dt * 1.2);
       }
 
       if (z.z > 24) {
@@ -3410,6 +3864,7 @@ export class GameEngine {
           this.passengerDistLeft = 80;
         }
         this.scene.remove(z.group);
+        if (z.officerRig) this.scene.remove(z.officerRig.group);
         this.zones.splice(i, 1);
       }
     }
@@ -3507,16 +3962,24 @@ export class GameEngine {
       }
     }
 
-    // Spawn Traffic + Traffic Jams
-    this.jamCooldown -= dt;
-    if (this.jamCooldown <= 0) {
-      this.jamCooldown = Math.max(12, 22 - this.loopCount * 2) + Math.random() * 6;
-      this.spawnTrafficJamCluster();
+    // Spawn Traffic + Traffic Jams (calm first 10s, then ramps smoothly)
+    const pacingTrafficMult =
+      this.runElapsed < 10
+        ? 0.45 + 0.35 * (this.runElapsed / 10)
+        : this.runElapsed < 25
+        ? 0.8 + 0.25 * ((this.runElapsed - 10) / 15)
+        : 1.15;
+    if (this.runElapsed >= 14) {
+      this.jamCooldown -= dt;
+      if (this.jamCooldown <= 0) {
+        this.jamCooldown = Math.max(12, 22 - this.loopCount * 2) + Math.random() * 6;
+        this.spawnTrafficJamCluster();
+      }
     }
 
     this.trafficSpawnTimer -= dt;
     if (this.trafficSpawnTimer <= 0) {
-      const interval = Math.max(0.32, 0.82 / (area.trafficMultiplier * loopMult));
+      const interval = Math.max(0.34, 0.86 / (area.trafficMultiplier * loopMult * pacingTrafficMult));
       this.trafficSpawnTimer = interval * (0.7 + Math.random() * 0.5);
       this.spawnTrafficVehicle();
     }
@@ -3793,28 +4256,38 @@ export class GameEngine {
           if (t.isVipConvoy) {
             this.vipYieldAwarded = true;
           }
-          const baseMoney =
-            t.isVipConvoy
-              ? 4800
-              : t.kind === 'car'
-              ? 3500
-              : t.kind === 'tempo'
-              ? 2600
-              : t.kind === 'cng_ai'
-              ? 2200
-              : t.kind === 'bike'
-              ? 1800
-              : t.kind === 'thelagari'
-              ? 1200
-              : 1500;
-          const rawHpLoss = t.isVipConvoy ? 24 : 12;
+          const isBigHit = t.isVipConvoy || t.kind === 'car' || t.kind === 'tempo';
+          const baseMoney = t.isVipConvoy
+            ? 5000
+            : t.kind === 'car'
+            ? 3500
+            : t.kind === 'tempo'
+            ? 2500
+            : t.kind === 'cng_ai'
+            ? 750
+            : t.kind === 'bike'
+            ? 650
+            : t.kind === 'rickshaw'
+            ? 500
+            : 400;
+          const hitLabel = t.isVipConvoy
+            ? 'ভিআইপি ধাক্কা!'
+            : t.kind === 'car'
+            ? 'টোল খাইছো!'
+            : t.kind === 'tempo'
+            ? 'টেম্পু ধাক্কা!'
+            : 'ধাক্কা!';
+          const dmgMoney = this.registerChaosHit(
+            Math.round(baseMoney * (this.playerX < -0.55 ? 1.5 : 1.0)),
+            isBigHit ? 'big' : 'small',
+            hitLabel
+          );
+          const rawHpLoss = t.isVipConvoy ? 20 : isBigHit ? 12 : 7;
           const hpLoss = Math.round(rawHpLoss * chassisDmgMult);
-          const dmgMoney = Math.round(baseMoney * (this.playerX < -0.55 ? 1.5 : 1.0));
-          this.nationalDamage += dmgMoney;
           this.hp -= hpLoss;
           this.wanted = Math.min(5, this.wanted + (t.isVipConvoy ? 2 : 1));
-          this.invulnTimer = 0.75;
-          this.shakeTimer = 0.38;
+          this.invulnTimer = 0.72;
+          this.shakeTimer = 0.36;
           this.shakeTrauma = Math.max(this.shakeTrauma, 0.88);
           this.triggerCrashSlowMo(0.32);
           this.playerSpeed = Math.max(8, this.playerSpeed * 0.55);
@@ -3828,11 +4301,11 @@ export class GameEngine {
           this.sound.playCrash(true);
           this.vibrate([45, 25, 50]);
           this.callbacks.onCrashJuice?.('minor');
-          this.triggerCrowdReaction(t.x, t.z, 'crash', 1);
+          this.triggerCrowdReaction(t.x, t.z, 'crash', isBigHit ? 3 : 1);
           this.callbacks.onToast({
             text: t.isVipConvoy
-              ? `🚨 ভিআইপি কনভয়ে ধাক্কা! -${toBn(hpLoss)} HP ও ক্ষতি +৳${toBn(dmgMoney)}!`
-              : `ধাক্কা! জাতীয় ক্ষতি +৳${toBn(dmgMoney)}!`,
+              ? `🚨 ভিআইপি কনভয়ে ধাক্কা! +৳${toBn(dmgMoney)}`
+              : `ধাক্কা! +৳${toBn(dmgMoney)}!`,
             tone: 'danger',
           });
           if (this.hp <= 0) {
@@ -3951,9 +4424,16 @@ export class GameEngine {
         const dx = this.playerX - p.x;
         const dz = 0 - p.z;
         const dist = Math.hypot(dx, dz) || 1;
-        const chaseSpeed = 15.5 + this.wanted * 1.4 + (this.loopCount - 1) * 1.5;
-        p.x += (dx / dist) * Math.min(9.5, chaseSpeed * 0.55) * dt;
-        p.z += (this.playerSpeed - chaseSpeed * 0.9) * dt + (dz / dist) * 4.5 * dt;
+        const chaseSpeed = 14.5 + Math.min(7, this.crowdCount * 0.28) + (this.loopCount - 1) * 1.4;
+        if (boosting) {
+          // Boost ("টান") pushes trailing crowd back & outward
+          p.x += (p.x >= this.playerX ? 1 : -1) * 2.8 * dt;
+          p.z += 10.5 * dt;
+          if (p.z > 18) p.z = 18;
+        } else {
+          p.x += (dx / dist) * Math.min(9.5, chaseSpeed * 0.6) * dt;
+          p.z += (this.playerSpeed - chaseSpeed * 0.92) * dt + (dz / dist) * 4.8 * dt;
+        }
         p.rig.group.rotation.y = Math.atan2(dx, dz);
         p.animPhase += dt * 15;
         activePose = 'run';
@@ -4009,7 +4489,7 @@ export class GameEngine {
           p.speechTimer = 2.8;
           this.spawnDustBurst(p.x, 0.22, p.z, 9);
 
-          this.nationalDamage += 800;
+          const dmgMoney = this.registerChaosHit(450, 'small', 'পথচারী ধাক্কা!');
           this.wanted = Math.min(5, this.wanted + 1);
           this.shakeTimer = 0.24;
           this.shakeTrauma = Math.max(this.shakeTrauma, 0.52);
@@ -4017,16 +4497,16 @@ export class GameEngine {
           this.callbacks.onCrashJuice?.('minor');
           this.sound.playCrash(false);
 
-          this.triggerCrowdReaction(p.x, p.z, 'crash', 2);
+          this.triggerCrowdReaction(p.x, p.z, 'crash', 1);
 
           this.callbacks.onToast({
-            text: 'পথচারীকে ধাক্কা! জাতীয় ক্ষতি +৳৮০০ — তারা তাড়া করছে!',
+            text: `পথচারীকে ধাক্কা! +৳${toBn(dmgMoney)} — পাবলিক পিছে!`,
             tone: 'danger',
           });
         } else {
           p.hitCooldown = 1.15;
-          p.z += 2.6;
-          const pedHpLoss = Math.round(22 * chassisDmgMult);
+          p.z += 2.8;
+          const pedHpLoss = Math.round(18 * chassisDmgMult);
           this.hp -= pedHpLoss;
           this.shakeTimer = 0.32;
           this.shakeTrauma = Math.max(this.shakeTrauma, 0.74);
@@ -4047,11 +4527,23 @@ export class GameEngine {
         }
       }
 
-      if (p.z > 20 || p.z < -175) {
+      // Keep active chasers trailing near camera unless far out of bounds
+      if (p.z > (p.isChasing ? 24 : 20) || p.z < -175) {
         this.scene.remove(p.rig.group);
         if (p.propGroup) this.scene.remove(p.propGroup);
         this.pedestrians.splice(i, 1);
       }
+    }
+
+    // If huge crowd (>= 15) surrounds a slow/stopped CNG for > 1.3s, crowd catches player!
+    if (this.crowdCount >= 15 && this.playerSpeed < 4.5 && !boosting) {
+      this.crowdSurroundTimer += dt;
+      if (this.crowdSurroundTimer >= 1.3) {
+        this.handleGameOver('pedestrian');
+        return;
+      }
+    } else {
+      this.crowdSurroundTimer = Math.max(0, this.crowdSurroundTimer - dt * 1.5);
     }
 
     this.updateDustPuffs(dt, distStep);
@@ -4245,6 +4737,21 @@ export class GameEngine {
 
       this.updateDustPuffs(simDt, drift);
       this.updateDebrisParticles(simDt, drift);
+      // Rising dark crash smoke during top-down orbit
+      if (Math.random() < realDt * 18) {
+        this.emitExhaustPuff(
+          this.playerX + (Math.random() - 0.5) * 0.45,
+          0.95,
+          (Math.random() - 0.5) * 0.45,
+          (Math.random() - 0.5) * 0.35,
+          1.4 + Math.random() * 0.9,
+          (Math.random() - 0.5) * 0.35,
+          0.85,
+          '#27272a'
+        );
+      }
+      this.updateExhaustPuffs(realDt);
+
       this.cngRig.bodyGroup.rotation.z = THREE.MathUtils.damp(
         this.cngRig.bodyGroup.rotation.z,
         0.28,
@@ -4264,8 +4771,8 @@ export class GameEngine {
         const dz = 0 - p.z;
         const dist = Math.hypot(dx, dz) || 1;
         if (dist > 2.2) {
-          p.x += (dx / dist) * 4.2 * simDt;
-          p.z += (dz / dist) * 4.2 * simDt;
+          p.x += (dx / dist) * 4.5 * simDt;
+          p.z += (dz / dist) * 4.5 * simDt;
         }
         p.rig.group.position.set(p.x, Math.abs(p.x) >= 8.65 ? 0.20 : 0, p.z);
         p.rig.group.rotation.y = Math.atan2(dx, dz);

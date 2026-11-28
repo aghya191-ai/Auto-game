@@ -23,7 +23,7 @@ export type PedestrianPose =
   | 'jump_back'
   | 'fall';
 
-export type SpeechCategory = 'crash' | 'horn' | 'violation';
+export type SpeechCategory = 'crash' | 'horn' | 'violation' | 'bribe';
 
 export interface PedestrianCreateOptions {
   style?: PedestrianStyle;
@@ -81,6 +81,11 @@ const SPEECH_LINES: Record<SpeechCategory, string[]> = {
     'ডিভাইডার ভাঙলো রে!',
     'উল্টা পথে ক্যান?!',
     'ধর ধর, পালাইতেছে!',
+  ],
+  bribe: [
+    'চা-পানি দেন, ভিড় থামাই!',
+    '২ সেকেন্ড থামেন, তাড়া শেষ!',
+    'আস্তে ঢোকেন, রাস্তা ক্লিয়ার!',
   ],
 };
 
@@ -213,11 +218,17 @@ function makeSpeechBubbleMaterial(text: string, category: SpeechCategory, maxAni
   const ctx = canvas.getContext('2d')!;
 
   const accent =
-    category === 'crash' ? '#dc2626' : category === 'violation' ? '#ea580c' : '#eab308';
+    category === 'crash'
+      ? '#dc2626'
+      : category === 'violation'
+      ? '#ea580c'
+      : category === 'bribe'
+      ? '#db2777'
+      : '#eab308';
 
   // Comic speech bubble with tail
-  ctx.fillStyle = '#fffbeb';
-  ctx.strokeStyle = '#18181b';
+  ctx.fillStyle = category === 'bribe' ? '#fdf2f8' : '#fffbeb';
+  ctx.strokeStyle = category === 'bribe' ? '#be185d' : '#18181b';
   ctx.lineWidth = 6;
 
   ctx.beginPath();
@@ -320,6 +331,11 @@ function getPool(maxAnisotropy = 1): AssetPool {
     }),
     violation: SPEECH_LINES.violation.map((t) => {
       const m = makeSpeechBubbleMaterial(t, 'violation', maxAnisotropy);
+      if (m.map) textures.push(m.map);
+      return m;
+    }),
+    bribe: SPEECH_LINES.bribe.map((t) => {
+      const m = makeSpeechBubbleMaterial(t, 'bribe', maxAnisotropy);
       if (m.map) textures.push(m.map);
       return m;
     }),

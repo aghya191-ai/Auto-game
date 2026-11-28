@@ -154,44 +154,98 @@ export function HUD({
             </span>
           </div>
         ) : (
-          <div className="flex max-w-[60vw] flex-col items-start gap-1 sm:max-w-xs">
-            {/* Compact Money & Loss Panel + Combo Badge Beside It */}
-            <div className="flex items-center gap-1.5">
-              <div className="pointer-events-auto relative cng-plate -rotate-[0.6deg] rounded-xl bg-emerald-600 px-2.5 py-1 text-white tabular-nums">
-                <div className="flex items-center gap-1.5 text-[10px] font-black leading-tight sm:text-[11px]">
-                  <span className="comic-money-stroke text-yellow-300">আজ ৳{toBn(hud.runTaka)}</span>
-                  <span className="text-stone-950/70">·</span>
-                  <span className="comic-text-stroke text-white">জমা ৳{toBn(totalTaka + hud.runTaka)}</span>
-                </div>
-                <div className="mt-0.5 flex items-center gap-1.5 leading-none">
-                  <span className="rounded border border-stone-950 bg-yellow-300 px-1 py-0.2 text-[9px] font-black text-stone-950">
-                    ক্ষতি
-                  </span>
-                  <span className="damage-text-3d text-base font-black text-yellow-300 sm:text-lg">
-                    ৳{toBn(hud.nationalDamage)}
-                  </span>
-                </div>
+          <div className="flex max-w-[62vw] flex-col items-start gap-1 sm:max-w-xs">
+            {/* Compact Money & Loss Header + 3s Combo Badge Beside It */}
+            <div className="pointer-events-auto relative tabular-nums">
+              <div className="flex flex-wrap items-center gap-1 text-[10px] font-black leading-none">
+                <span className="sticker-chip rounded-full bg-emerald-700 px-2 py-0.5 text-yellow-300">
+                  জাতীয় ক্ষতি
+                </span>
+                <span className="sticker-chip rounded-full bg-emerald-600 px-2 py-0.5 text-white">
+                  আজ ৳{toBn(hud.runTaka)} · জমা ৳{toBn(totalTaka + hud.runTaka)}
+                </span>
               </div>
 
-              {comboCount >= 2 && (
-                <div
-                  key={comboBurstKey}
-                  className="animate-combo-burst sticker-chip shrink-0 rounded-xl bg-gradient-to-r from-pink-500 to-amber-400 px-2 py-1 text-[11px] font-black text-stone-950 tabular-nums whitespace-nowrap"
-                >
-                  <span className="inline-flex items-center gap-0.5">
-                    <Flame className="h-3.5 w-3.5 fill-yellow-200 text-stone-950" />
-                    <span>×{toBn(comboCount)}</span>
-                  </span>
-                </div>
-              )}
+              <div className="mt-0.5 flex items-center gap-1.5 leading-none">
+                <span className="damage-text-3d text-2xl font-black text-yellow-300 sm:text-3xl">
+                  ৳{toBn(hud.nationalDamage)}
+                </span>
+
+                {comboCount >= 2 && (
+                  <div
+                    key={`${comboBurstKey}-${comboCount}`}
+                    className="animate-combo-burst sticker-chip shrink-0 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 px-2 py-0.5 text-xs font-black text-white tabular-nums whitespace-nowrap"
+                  >
+                    <span className="inline-flex items-center gap-0.5">
+                      <Flame className="h-3.5 w-3.5 fill-yellow-300 text-yellow-200" />
+                      <span>×{toBn(comboCount)}</span>
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Floating "+৳ amount" popups directly beneath the money counter */}
+              <div className="pointer-events-none relative h-0 w-44">
+                {floatingPopups.map((popup) => (
+                  <div
+                    key={popup.id}
+                    className="animate-float-wobble absolute top-1 z-30 flex flex-col items-center whitespace-nowrap tabular-nums"
+                    style={{ left: `${44 + popup.offsetX}px` }}
+                  >
+                    <span
+                      className={`inline-block rounded-lg border-2 border-stone-950 px-2 py-0.5 text-sm font-black shadow-[2px_2px_0_#1c1917] sm:text-base ${
+                        popup.tone === 'gain'
+                          ? 'bg-yellow-300 text-emerald-900'
+                          : 'bg-red-500 text-yellow-200'
+                      }`}
+                    >
+                      {popup.text}
+                    </span>
+                    {popup.sub && (
+                      <span className="mt-0.5 rounded bg-stone-950/85 px-1.5 py-0.2 text-[9px] font-black text-yellow-200">
+                        {popup.sub}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
 
-            {isDriverView ? (
-              hud.chasedCount > 0 ? (
-                <div className="animate-crowd-shake sticker-chip rounded-lg bg-red-600/95 px-2 py-0.5 text-[10px] font-black text-yellow-300">
-                  পাবলিক পিছে! ({toBn(hud.chasedCount)})
+            {/* Crowd Counter Pill: starts at "পাবলিক পিছে: ০ জন" */}
+            <div
+              className={`sticker-chip rounded-lg px-2 py-0.5 text-[10px] font-black tabular-nums ${
+                hud.chasedCount > 0
+                  ? 'animate-crowd-shake bg-red-600 text-yellow-300'
+                  : 'bg-stone-900/80 text-stone-100'
+              }`}
+            >
+              পাবলিক পিছে: {toBn(hud.chasedCount)} জন
+            </div>
+
+            {/* Bribe Zone 2s Stop Progress */}
+            {hud.inBribeZone && (
+              <div className="sticker-chip flex flex-col gap-0.5 rounded-lg bg-pink-500/95 px-2.5 py-1 text-[10px] font-black text-white tabular-nums">
+                <span>
+                  গোলাপি দাগে থামুন (২ সে): ৳{toBn(hud.bribeCost)} চা-পানি
+                </span>
+                <div className="h-1.5 w-full overflow-hidden rounded-full border border-stone-950 bg-white/80">
+                  <div
+                    className="h-full bg-yellow-300 transition-all duration-75"
+                    style={{ width: `${Math.round(hud.bribeProgress * 100)}%` }}
+                  />
                 </div>
-              ) : hud.aheadTrafficLight?.state === 'red' ? (
+              </div>
+            )}
+
+            {/* Charging Zone */}
+            {hud.inGasZone && (
+              <div className="sticker-chip rounded-lg bg-yellow-300 px-2 py-0.5 text-[10px] font-black text-stone-950">
+                দাগে থামেন, চার্জ হচ্ছে!
+              </div>
+            )}
+
+            {isDriverView ? (
+              hud.aheadTrafficLight?.state === 'red' ? (
                 <div className="sticker-chip flex items-center gap-1 rounded-lg bg-red-500/95 px-2 py-0.5 text-[10px] font-black text-white tabular-nums">
                   <span className="h-2 w-2 rounded-full border border-stone-950 bg-red-700" />
                   <span>লাল বাতি · {toBn(hud.aheadTrafficLight.dist)} মি</span>
@@ -261,13 +315,6 @@ export function HUD({
                   )}
                 </div>
 
-                {/* Compact Conditional Alerts (never crowding center 60%) */}
-                {hud.chasedCount > 0 && (
-                  <div className="animate-crowd-shake sticker-chip rounded-lg bg-red-600 px-2 py-0.5 text-[10px] font-black text-yellow-300">
-                    পাবলিক পিছে! ({toBn(hud.chasedCount)})
-                  </div>
-                )}
-
                 {hud.wrongWay && (
                   <div className="sticker-chip rotate-1 rounded-lg bg-cyan-300 px-2 py-0.5 text-[10px] font-black text-stone-950">
                     উল্টো পথ · ×১.৫
@@ -311,12 +358,6 @@ export function HUD({
                     <span>
                       {toBn(hud.aheadTrafficLight.dist)} মি · {toBn(hud.aheadTrafficLight.timeLeft)} সে
                     </span>
-                  </div>
-                )}
-
-                {hud.inGasZone && (
-                  <div className="sticker-chip rounded-lg bg-yellow-300 px-2 py-0.5 text-[10px] font-black text-stone-950">
-                    দাগের ওপর থামেন, গ্যাস ভরছে!
                   </div>
                 )}
 
@@ -540,12 +581,34 @@ export function HUD({
             </div>
           )}
 
-          {/* Small Circular Minimap Radar */}
+          {/* Small Circular Minimap Radar with Active Destination Route Line */}
           <div className="relative h-16 w-16 overflow-hidden rounded-full border-[3px] border-stone-950 bg-stone-900 shadow-[3px_3px_0_#1c1917] sm:h-20 sm:w-20">
             <svg viewBox="0 0 100 100" className="h-full w-full">
               <rect x="33" y="0" width="34" height="100" fill="#292524" />
               <line x1="50" y1="0" x2="50" y2="100" stroke="#facc15" strokeWidth="1.8" />
               <rect x="0" y="42" width="100" height="10" fill="#3f3f46" opacity="0.7" />
+
+              {(() => {
+                const destEnt = hud.radarEntities.find((e) => e.kind === 'dropoff');
+                if (!destEnt) return null;
+                const dpx = 50 + Math.max(-36, Math.min(36, destEnt.dx * 2.2));
+                const dpy = 62 + Math.max(-54, Math.min(32, destEnt.dz * 0.55));
+                return (
+                  <g>
+                    <line
+                      x1="50"
+                      y1="62"
+                      x2={dpx}
+                      y2={dpy}
+                      stroke="#22d3ee"
+                      strokeWidth="2.6"
+                      strokeDasharray="4 2.5"
+                      strokeLinecap="round"
+                      opacity="0.92"
+                    />
+                  </g>
+                );
+              })()}
 
               {hud.radarEntities.map((ent, idx) => {
                 const px = 50 + Math.max(-36, Math.min(36, ent.dx * 2.2));
@@ -605,7 +668,15 @@ export function HUD({
                     />
                   );
                 }
-                if (ent.kind === 'pickup' || ent.kind === 'dropoff') {
+                if (ent.kind === 'dropoff') {
+                  return (
+                    <g key={idx} transform={`translate(${px}, ${py})`}>
+                      <circle r="6.2" fill="#10b981" stroke="#ffffff" strokeWidth="1.4" />
+                      <circle r="2.4" fill="#ffffff" />
+                    </g>
+                  );
+                }
+                if (ent.kind === 'pickup') {
                   return (
                     <circle
                       key={idx}
@@ -661,7 +732,17 @@ export function HUD({
             </svg>
           </div>
 
-          {!cleanMode && hud.nearestGasDist !== null && (
+          {/* Destination Chip right below Minimap */}
+          {!cleanMode && (
+            <div className="sticker-chip flex items-center gap-1 rounded-full bg-stone-900/90 px-2.5 py-0.5 text-[10px] font-black text-white tabular-nums">
+              <Navigation className="h-2.5 w-2.5 shrink-0 fill-pink-400 text-pink-400" />
+              <span>
+                {toBn(hud.destinationDistLeft)} মি সামনে · {hud.destinationName}
+              </span>
+            </div>
+          )}
+
+          {!cleanMode && hud.nearestGasDist !== null && (lowGas || hud.nearestGasDist <= 85) && (
             <div className="sticker-chip flex items-center gap-0.5 rounded-lg bg-yellow-300/95 px-2 py-0.5 text-[10px] font-black text-stone-950 tabular-nums">
               <Navigation
                 className={`h-2.5 w-2.5 text-red-600 ${hud.nearestGasAhead ? '' : 'rotate-180'}`}
@@ -674,29 +755,6 @@ export function HUD({
           )}
         </div>
       </div>
-
-      {/* Floating +৳৫০০ / Damage Wobble Popups positioned near top-left so center road stays clear */}
-      {!cleanMode && (
-        <div className="pointer-events-none fixed left-20 top-20 z-30 sm:left-28 sm:top-20">
-          {floatingPopups.map((popup) => (
-            <div
-              key={popup.id}
-              className="animate-float-wobble absolute top-0 whitespace-nowrap tabular-nums"
-              style={{ left: `${popup.offsetX}px` }}
-            >
-              <span
-                className={`inline-block rounded-lg border-2 border-stone-950 px-2.5 py-0.5 text-sm font-black shadow-[2px_2px_0_#1c1917] sm:text-base ${
-                  popup.tone === 'gain'
-                    ? 'bg-yellow-300 text-emerald-800'
-                    : 'bg-red-500 text-yellow-200'
-                }`}
-              >
-                {popup.text}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* TOP-CENTER Single Small Pill Slot (max ~44px tall, semi-transparent, auto-hides) */}
       {!cleanMode && (topPillMode || hud.activeEvent) && (
@@ -741,6 +799,23 @@ export function HUD({
         <div className="sticker-chip mx-auto mb-1 hidden rounded-lg bg-[#fef6df]/90 px-2.5 py-0.5 text-[11px] font-black text-stone-950 md:block">
           W/A/S/D বা তীর: চালানো · Shift: বুস্ট · H: হর্ন · B: শব্দবোমা · C: ক্যামেরা · T: দিন/সন্ধ্যা/বৃষ্টি · R: রেডিও · V: পেছনে
         </div>
+      )}
+
+      {/* Pulsing Red Warning Bar at Bottom when a Bus or Truck is within 40 m in the Same Lane */}
+      {!cleanMode && hud.heavyLaneWarning && phase === 'playing' && (
+        <>
+          <div className="pointer-events-none fixed inset-x-0 bottom-7 z-10 h-5 animate-pulse bg-gradient-to-t from-red-600/90 via-red-600/50 to-transparent" />
+          <div className="pointer-events-none fixed bottom-8 left-1/2 z-30 -translate-x-1/2">
+            <div className="animate-pulse sticker-chip flex items-center gap-1.5 rounded-full bg-red-600 px-3 py-1 text-[11px] font-black text-yellow-200 whitespace-nowrap tabular-nums">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 fill-yellow-300 text-stone-950" />
+              <span>
+                {hud.heavyLaneWarning.direction === 'ahead' ? 'সামনে' : 'পেছনে'}{' '}
+                {hud.heavyLaneWarning.kind === 'bus' ? 'সিটি বাস' : 'ট্রাক'} ·{' '}
+                {toBn(hud.heavyLaneWarning.dist)} মি!
+              </span>
+            </div>
+          </div>
+        </>
       )}
 
       {/* Bottom Live Breaking News Street Ticker (with single-line FM Radio feed) */}

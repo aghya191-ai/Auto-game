@@ -56,14 +56,21 @@ const INITIAL_HUD: HudSnapshot = {
   distanceMeters: 0,
   boosting: false,
   chasedCount: 0,
+  hitCombo: 0,
+  hitComboTimeLeft: 0,
   inGasZone: false,
   inBribeZone: false,
+  bribeProgress: 0,
+  bribeCost: 0,
   passengerActive: false,
   passengerDestination: '',
   passengerFare: 0,
   passengerDistLeft: 0,
   passengerNearPickup: false,
   pickupProgress: 0,
+  destinationName: AREAS[1]?.name ?? 'আন্দরকিল্লা',
+  destinationDistLeft: 220,
+  destinationFare: 420,
   activeEvent: null,
   cameraMode: 'external',
   steerDir: 0,
@@ -73,6 +80,7 @@ const INITIAL_HUD: HudSnapshot = {
   aheadHazard: null,
   aheadTrafficLight: null,
   rearHazard: null,
+  heavyLaneWarning: null,
   soundBombCooldown: 0,
   weather: 'sunny',
   atmosphereMode: 'day',
@@ -106,7 +114,6 @@ export default function App() {
   const [activeToast, setActiveToast] = useState<GameEventToast | null>(null);
   const [cleanMode, setCleanMode] = useState(false);
   const [floatingPopups, setFloatingPopups] = useState<FloatingMoneyPopup[]>([]);
-  const [comboCount, setComboCount] = useState(0);
   const [comboBurstKey, setComboBurstKey] = useState(0);
   const [crashShakeActive, setCrashShakeActive] = useState(false);
   const [crashFlashKey, setCrashFlashKey] = useState(0);
@@ -122,7 +129,6 @@ export default function App() {
   const flashResetTimerRef = useRef<number>(0);
   const crashBurstTimerRef = useRef<number>(0);
   const comboFlashResetTimerRef = useRef<number>(0);
-  const comboTimerRef = useRef<number>(0);
   const toastHideTimerRef = useRef<number>(0);
   const toastQueueRef = useRef<GameEventToast[]>([]);
   const activeToastRef = useRef<GameEventToast | null>(null);
@@ -134,7 +140,7 @@ export default function App() {
   const lastRadioTextRef = useRef('');
   const lastRadioAreaRef = useRef<number>(-1);
   const prevTakaRef = useRef<number>(0);
-  const prevDamageRef = useRef<number>(0);
+  const skipNextTakaPopupRef = useRef<boolean>(false);
   const hudRef = useRef<HudSnapshot>(INITIAL_HUD);
   hudRef.current = hud;
 
@@ -142,37 +148,16 @@ export default function App() {
     getDriverProgression(save.highScore, save.completedMissionsTotal, save.driverXp).current.level
   );
 
-  const pushFloatingPopup = useCallback((text: string, tone: 'gain' | 'damage') => {
+  const pushFloatingPopup = useCallback((text: string, tone: 'gain' | 'damage', sub?: string) => {
     const id = popupIdRef.current++;
-    const offsetX = ((id % 5) - 2) * 20;
-    setFloatingPopups((prev) => [...prev.slice(-3), { id, text, tone, offsetX }]);
+    const offsetX = ((id % 3) - 1) * 10;
+    setFloatingPopups((prev) => [...prev.slice(-3), { id, text, sub, tone, offsetX }]);
     window.setTimeout(() => {
       setFloatingPopups((prev) => prev.filter((p) => p.id !== id));
     }, 1350);
   }, []);
 
-  const bumpCombo = useCallback((delta = 1) => {
-    setComboCount((prev) => {
-      const next = prev + delta;
-      engineRef.current?.sound.playCoinDing(next);
-      if (next >= 2) {
-        setComboFlashKey((k) => k + 1);
-        setComboFlashActive(true);
-        clearTimeout(comboFlashResetTimerRef.current);
-        comboFlashResetTimerRef.current = window.setTimeout(() => setComboFlashActive(false), 240);
-      }
-      return next;
-    });
-    setComboBurstKey((k) => k + 1);
-    clearTimeout(comboTimerRef.current);
-    comboTimerRef.current = window.setTimeout(() => {
-      setComboCount(0);
-    }, 5200);
-  }, []);
-
   const triggerCrashJuice = useCallback(() => {
-    setComboCount(0);
-    clearTimeout(comboTimerRef.current);
     setCrashShakeActive(false);
     requestAnimationFrame(() => setCrashShakeActive(true));
     clearTimeout(shakeResetTimerRef.current);
@@ -364,22 +349,35 @@ export default function App() {
       {
         onHudUpdate: (snapshot) => {
           const takaGain = snapshot.runTaka - prevTakaRef.current;
-          const dmgGain = snapshot.nationalDamage - prevDamageRef.current;
-          if (prevTakaRef.current >= 0 && takaGain >= 20) {
+          if (skipNextTakaPopupRef.current) {
+            skipNextTakaPopupRef.current = false;
+          } else if (prevTakaRef.current >= 0 && takaGain >= 20) {
             pushFloatingPopup(`+৳${toBn(takaGain)}`, 'gain');
-            bumpCombo(1);
+            engineRef.current?.sound.playCoinDing(1);
             try {
-              navigator.vibrate?.(16);
+              navigator.vibrate?.(14);
             } catch {
               // Ignore vibration errors
             }
           }
-          if (prevDamageRef.current >= 0 && dmgGain >= 150) {
-            pushFloatingPopup(`+৳${toBn(dmgGain)} ক্ষতি!`, 'damage');
-          }
           prevTakaRef.current = snapshot.runTaka;
-          prevDamageRef.current = snapshot.nationalDamage;
           setHud(snapshot);
+        },
+        onHitPopup: (event) => {
+          skipNextTakaPopupRef.current = true;
+          pushFloatingPopup(`+৳${toBn(event.amount)}`, 'gain', event.label);
+          if (event.combo >= 2) {
+            setComboBurstKey((k) => k + 1);
+            setComboFlashKey((k) => k + 1);
+            setComboFlashActive(true);
+            clearTimeout(comboFlashResetTimerRef.current);
+            comboFlashResetTimerRef.current = window.setTimeout(() => setComboFlashActive(false), 240);
+          }
+          try {
+            navigator.vibrate?.(event.combo >= 2 ? 22 : 14);
+          } catch {
+            // Ignore vibration errors
+          }
         },
         onAreaEnter: (name, tagline, loopCount) => {
           areaBannerActiveRef.current = true;
@@ -454,12 +452,11 @@ export default function App() {
       clearTimeout(flashResetTimerRef.current);
       clearTimeout(crashBurstTimerRef.current);
       clearTimeout(comboFlashResetTimerRef.current);
-      clearTimeout(comboTimerRef.current);
       clearTimeout(toastHideTimerRef.current);
       engine.dispose();
       engineRef.current = null;
     };
-  }, [bumpCombo, handleMissionProgress, pushFloatingPopup, pushToast, showToastNow, triggerCrashJuice]);
+  }, [handleMissionProgress, pushFloatingPopup, pushToast, showToastNow, triggerCrashJuice]);
 
   const handleToggleCamera = useCallback(() => {
     if (!engineRef.current) return;
@@ -626,9 +623,8 @@ export default function App() {
     setActiveToast(null);
     setAreaBanner(null);
     prevTakaRef.current = 0;
-    prevDamageRef.current = 0;
+    skipNextTakaPopupRef.current = false;
     setFloatingPopups([]);
-    setComboCount(0);
     lastRadioAtRef.current = 0;
     lastRadioAreaRef.current = startAreaIndex;
     setPhase('playing');
@@ -956,7 +952,7 @@ export default function App() {
           radioEnabled={radioEnabled}
           activeRadioClip={activeRadioClip}
           floatingPopups={floatingPopups}
-          comboCount={comboCount}
+          comboCount={hud.hitCombo}
           comboBurstKey={comboBurstKey}
           showTouchControls={showTouchControls}
           cleanMode={cleanMode}

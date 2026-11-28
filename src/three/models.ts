@@ -678,6 +678,38 @@ export function createZonePad(
 
   if (type === 'gas' || type === 'bribe') {
     const isGas = type === 'gas';
+    // Translucent glowing vertical light beam/stripe marker so player spots pink bribe / yellow charge zone easily
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: isGas ? '#facc15' : '#ec4899',
+      transparent: true,
+      opacity: isGas ? 0.16 : 0.24,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(isGas ? 2.1 : 2.2, isGas ? 2.25 : 2.35, 6.2, 18, 1, true),
+      beamMat
+    );
+    beam.position.y = 3.1;
+    group.add(beam);
+
+    // Glowing transverse stripe across the lane for instant visibility
+    const stripeMat = new THREE.MeshBasicMaterial({
+      color: isGas ? '#fde047' : '#f472b6',
+      transparent: true,
+      opacity: 0.72,
+      polygonOffset: true,
+      polygonOffsetFactor: -3,
+      polygonOffsetUnits: -3,
+    });
+    const stripeFront = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 0.55), stripeMat);
+    stripeFront.rotation.x = -Math.PI / 2;
+    stripeFront.position.set(0, 0.04, 3.8);
+    const stripeBack = stripeFront.clone();
+    stripeBack.position.z = -3.8;
+    group.add(stripeFront, stripeBack);
+
     const kioskGroup = new THREE.Group();
     const kioskMat = new THREE.MeshStandardMaterial({
       color: isGas ? '#eab308' : '#ec4899',
@@ -685,13 +717,13 @@ export function createZonePad(
     });
     const roofMat = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.6 });
 
-    const base = new THREE.Mesh(new THREE.BoxGeometry(1.9, 2.0, 1.9), kioskMat);
-    base.position.y = 1.0;
+    const base = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.9, 1.7), kioskMat);
+    base.position.y = 0.95;
     base.castShadow = true;
-    const canopy = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.25, 2.6), roofMat);
-    canopy.position.y = 2.4;
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.22, 2.3), roofMat);
+    canopy.position.y = 2.25;
     kioskGroup.add(base, canopy);
-    kioskGroup.position.set(4.5, 0, 0);
+    kioskGroup.position.set(4.1, 0, 0);
     group.add(kioskGroup);
   } else if (type === 'dropoff') {
     const post = new THREE.Mesh(
@@ -1186,4 +1218,88 @@ export function createProtestPlacard(
 
   group.add(pole, sign);
   return group;
+}
+
+export interface RoadObstacleRig {
+  group: THREE.Group;
+  kind: 'billboard' | 'pillar';
+  halfWidth: number;
+  halfLength: number;
+}
+
+export function createHalfRoadBillboard(adIndex: number, maxAnisotropy = 1): RoadObstacleRig {
+  const group = new THREE.Group();
+  const ad = BILLBOARD_ADS[adIndex % BILLBOARD_ADS.length];
+  const steelMat = new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.5, metalness: 0.6 });
+  const warnMat = new THREE.MeshStandardMaterial({ color: '#facc15', roughness: 0.45 });
+  const redMat = new THREE.MeshStandardMaterial({ color: '#dc2626', roughness: 0.45 });
+
+  // Two hazard-striped legs spanning ~3.3m (blocks half of the carriageway!)
+  [-1.45, 1.45].forEach((lx) => {
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.35, 0.55), redMat);
+    base.position.set(lx, 0.175, 0);
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 3.1, 8), steelMat);
+    leg.position.set(lx, 1.55, 0);
+    leg.castShadow = true;
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.125, 0.125, 0.38, 8), warnMat);
+    band.position.set(lx, 0.95, 0);
+    group.add(base, leg, band);
+  });
+
+  // Crossbar + wide colorful billboard panel across half the road
+  const boardBack = new THREE.Mesh(new THREE.BoxGeometry(3.45, 1.75, 0.18), steelMat);
+  boardBack.position.set(0, 2.25, 0);
+  boardBack.castShadow = true;
+
+  const tex = createBillboardTexture(ad.title, ad.subtitle, ad.bg, ad.fg, maxAnisotropy);
+  const faceFront = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.25, 1.56),
+    new THREE.MeshBasicMaterial({ map: tex })
+  );
+  faceFront.position.set(0, 2.25, 0.1);
+  const faceBack = faceFront.clone();
+  faceBack.position.z = -0.1;
+  faceBack.rotation.y = Math.PI;
+
+  // Low barricade rail between legs so player clearly sees it's a physical blockade
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(3.15, 0.42, 0.14), warnMat);
+  rail.position.set(0, 0.72, 0);
+
+  group.add(boardBack, faceFront, faceBack, rail);
+  return { group, kind: 'billboard', halfWidth: 1.62, halfLength: 0.55 };
+}
+
+export function createLaneFlyoverPillar(posterIdx: number, maxAnisotropy = 1): RoadObstacleRig {
+  const group = new THREE.Group();
+  const concreteMat = new THREE.MeshStandardMaterial({ color: '#94a3b8', roughness: 0.85 });
+  const curbYellowMat = new THREE.MeshStandardMaterial({ color: '#eab308', roughness: 0.6 });
+  const curbBlackMat = new THREE.MeshStandardMaterial({ color: '#18181b', roughness: 0.7 });
+
+  // Heavy concrete plinth at road level with black/yellow hazard collar
+  const plinth = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.45, 1.55), curbYellowMat);
+  plinth.position.y = 0.225;
+  plinth.castShadow = true;
+  const collar = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.26, 1.42), curbBlackMat);
+  collar.position.y = 0.56;
+
+  // Thick concrete flyover/footbridge support column rising into overhead deck beam
+  const column = new THREE.Mesh(new THREE.BoxGeometry(1.22, 7.6, 1.22), concreteMat);
+  column.position.y = 4.2;
+  column.castShadow = true;
+
+  // Concrete overhead cap beam extending toward the sidewalk
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.85, 1.6), concreteMat);
+  cap.position.y = 8.1;
+
+  // Bengali wall posters plastered onto front/sides of the concrete column (authentic Dhaka/Chattogram flyover look)
+  const poster = WALL_POSTERS[posterIdx % WALL_POSTERS.length];
+  const posterTex = createWallPosterTexture(poster.text, poster.bg, poster.fg, maxAnisotropy, poster.sub, poster.badge);
+  const posterMat = new THREE.MeshBasicMaterial({ map: posterTex });
+  const frontPoster = new THREE.Mesh(new THREE.PlaneGeometry(1.02, 0.86), posterMat);
+  frontPoster.position.set(0, 2.05, 0.625);
+  const frontPoster2 = new THREE.Mesh(new THREE.PlaneGeometry(1.02, 0.86), posterMat);
+  frontPoster2.position.set(0, 3.15, 0.625);
+
+  group.add(plinth, collar, column, cap, frontPoster, frontPoster2);
+  return { group, kind: 'pillar', halfWidth: 0.78, halfLength: 0.78 };
 }
