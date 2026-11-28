@@ -75,6 +75,8 @@ interface SharedVehicleGeos {
   ambulanceBody: THREE.ExtrudeGeometry;
   pickupCab: THREE.ExtrudeGeometry;
   truckCab: THREE.ExtrudeGeometry;
+  tempoCab: THREE.ExtrudeGeometry;
+  bikeTank: THREE.ExtrudeGeometry;
   cngNose: THREE.ExtrudeGeometry;
   cngRearTub: THREE.ExtrudeGeometry;
   tireCar: THREE.CylinderGeometry;
@@ -85,7 +87,63 @@ interface SharedVehicleGeos {
   rimCng: THREE.CylinderGeometry;
   tireMoto: THREE.CylinderGeometry;
   rimMoto: THREE.CylinderGeometry;
+  tireRickshaw: THREE.CylinderGeometry;
+  rimRickshaw: THREE.TorusGeometry;
+  rickshawHub: THREE.CylinderGeometry;
   spokeBar: THREE.BoxGeometry;
+  rickshawSpoke: THREE.BoxGeometry;
+  motoSpoke: THREE.BoxGeometry;
+  limbThigh: THREE.BoxGeometry;
+  limbShin: THREE.BoxGeometry;
+  footGeo: THREE.BoxGeometry;
+  helmetDome: THREE.SphereGeometry;
+  helmetVisor: THREE.BoxGeometry;
+}
+
+interface SharedRiderMats {
+  skin: THREE.MeshStandardMaterial;
+  shirts: THREE.MeshStandardMaterial[];
+  lungis: THREE.MeshStandardMaterial[];
+  pantsDark: THREE.MeshStandardMaterial;
+  gamchhaRed: THREE.MeshStandardMaterial;
+  helmets: THREE.MeshStandardMaterial[];
+  helmetVisor: THREE.MeshStandardMaterial;
+}
+
+let cachedRiderMats: SharedRiderMats | null = null;
+function getSharedRiderMats(): SharedRiderMats {
+  if (cachedRiderMats) return cachedRiderMats;
+  cachedRiderMats = {
+    skin: new THREE.MeshStandardMaterial({ color: '#a16207', roughness: 0.74 }),
+    shirts: [
+      new THREE.MeshStandardMaterial({ color: '#0ea5e9', roughness: 0.82 }),
+      new THREE.MeshStandardMaterial({ color: '#f97316', roughness: 0.82 }),
+      new THREE.MeshStandardMaterial({ color: '#16a34a', roughness: 0.82 }),
+      new THREE.MeshStandardMaterial({ color: '#e11d48', roughness: 0.82 }),
+      new THREE.MeshStandardMaterial({ color: '#facc15', roughness: 0.82 }),
+      new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.8 }),
+    ],
+    lungis: [
+      new THREE.MeshStandardMaterial({ color: '#312e81', roughness: 0.88 }),
+      new THREE.MeshStandardMaterial({ color: '#7f1d1d', roughness: 0.88 }),
+      new THREE.MeshStandardMaterial({ color: '#065f46', roughness: 0.88 }),
+    ],
+    pantsDark: new THREE.MeshStandardMaterial({ color: '#0f172a', roughness: 0.85 }),
+    gamchhaRed: new THREE.MeshStandardMaterial({ color: '#dc2626', roughness: 0.86 }),
+    helmets: [
+      new THREE.MeshStandardMaterial({ color: '#18181b', roughness: 0.2, metalness: 0.42 }),
+      new THREE.MeshStandardMaterial({ color: '#facc15', roughness: 0.22, metalness: 0.32 }),
+      new THREE.MeshStandardMaterial({ color: '#dc2626', roughness: 0.22, metalness: 0.35 }),
+      new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.2, metalness: 0.3 }),
+    ],
+    helmetVisor: new THREE.MeshStandardMaterial({
+      color: '#090d16',
+      roughness: 0.06,
+      metalness: 0.82,
+      envMapIntensity: 1.5,
+    }),
+  };
+  return cachedRiderMats;
 }
 
 let cachedGeos: SharedVehicleGeos | null = null;
@@ -220,6 +278,33 @@ function getSharedVehicleGeos(): SharedVehicleGeos {
     0.09
   );
 
+  const tempoCab = makeSideExtrudeGeometry(
+    [
+      [-1.72, 0.42],
+      [-1.74, 0.92],
+      [-1.34, 1.18],
+      [-0.96, 1.78],
+      [-0.24, 1.78],
+      [-0.2, 0.42],
+    ],
+    1.56,
+    0.05,
+    0.07
+  );
+
+  const bikeTank = makeSideExtrudeGeometry(
+    [
+      [-0.56, 0.74],
+      [-0.52, 0.96],
+      [-0.32, 1.04],
+      [-0.02, 0.92],
+      [0.02, 0.74],
+    ],
+    0.36,
+    0.03,
+    0.04
+  );
+
   const makeTire = (r: number, w: number) => {
     const g = new THREE.CylinderGeometry(r, r, w, 14);
     g.rotateZ(Math.PI / 2);
@@ -231,6 +316,16 @@ function getSharedVehicleGeos(): SharedVehicleGeos {
     return g;
   };
 
+  const rimRickshaw = new THREE.TorusGeometry(0.325, 0.018, 6, 16);
+  rimRickshaw.rotateY(Math.PI / 2);
+  const rickshawHub = new THREE.CylinderGeometry(0.042, 0.042, 0.095, 8);
+  rickshawHub.rotateZ(Math.PI / 2);
+
+  const limbThigh = new THREE.BoxGeometry(0.11, 0.28, 0.11);
+  limbThigh.translate(0, -0.14, 0);
+  const limbShin = new THREE.BoxGeometry(0.085, 0.29, 0.085);
+  limbShin.translate(0, -0.145, 0);
+
   cachedGeos = {
     sedanBody,
     sedanGlass,
@@ -239,6 +334,8 @@ function getSharedVehicleGeos(): SharedVehicleGeos {
     ambulanceBody,
     pickupCab,
     truckCab,
+    tempoCab,
+    bikeTank,
     cngNose,
     cngRearTub,
     tireCar: makeTire(0.35, 0.23),
@@ -249,7 +346,17 @@ function getSharedVehicleGeos(): SharedVehicleGeos {
     rimCng: makeRim(0.3, 0.18),
     tireMoto: makeTire(0.34, 0.11),
     rimMoto: makeRim(0.34, 0.11),
+    tireRickshaw: makeTire(0.38, 0.062),
+    rimRickshaw,
+    rickshawHub,
     spokeBar: new THREE.BoxGeometry(0.03, 0.42, 0.055),
+    rickshawSpoke: new THREE.BoxGeometry(0.012, 0.62, 0.012),
+    motoSpoke: new THREE.BoxGeometry(0.014, 0.48, 0.014),
+    limbThigh,
+    limbShin,
+    footGeo: new THREE.BoxGeometry(0.095, 0.055, 0.16),
+    helmetDome: new THREE.SphereGeometry(0.18, 10, 10),
+    helmetVisor: new THREE.BoxGeometry(0.25, 0.1, 0.16),
   };
   return cachedGeos;
 }
@@ -713,20 +820,25 @@ export interface TrafficModelRig {
   group: THREE.Group;
   bodyGroup: THREE.Group;
   detailGroup: THREE.Group;
+  leanGroup?: THREE.Group;
   wheelDetails: THREE.Object3D[];
   halfWidth: number;
   halfLength: number;
   wheels: THREE.Object3D[];
   wheelRadius: number;
   isEmergency?: boolean;
+  hasExhaustPuffs?: boolean;
+  exhaustLocalPos?: { x: number; y: number; z: number };
   setBraking: (braking: boolean) => void;
   setTurnSignal: (dir: -1 | 0 | 1 | 2, blinkOn: boolean) => void;
   setEmergencyPhase?: (phase: number) => void;
+  animate?: (dt: number, speed: number, leanAngle: number) => void;
 }
 
 export function createVehicleModel(kind: VehicleKind, maxAnisotropy: number): TrafficModelRig {
   const pool = getVehicleAssetPool(maxAnisotropy);
   const geos = getSharedVehicleGeos();
+  const riderMats = getSharedRiderMats();
 
   const group = new THREE.Group();
   const bodyGroup = new THREE.Group();
@@ -1271,177 +1383,602 @@ export function createVehicleModel(kind: VehicleKind, maxAnisotropy: number): Tr
   }
 
   // =========================================================================
-  // 4. CYCLE RICKSHAWS WITH PAINTED BACK PANELS
+  // 4. CYCLE RICKSHAWS (painted back panel, hood, spinning spoked wheels, pedaling puller)
   // =========================================================================
   if (kind === 'rickshaw') {
-    wheelRadius = 0.36;
+    wheelRadius = 0.38;
     const hoodColors = ['#e11d48', '#2563eb', '#9333ea', '#059669', '#ea580c'];
     const hoodMat = new THREE.MeshStandardMaterial({
       color: hoodColors[Math.floor(Math.random() * hoodColors.length)],
       roughness: 0.68,
     });
-    const trimMat = new THREE.MeshStandardMaterial({ color: '#facc15', roughness: 0.48 });
+    const trimMat = new THREE.MeshStandardMaterial({ color: '#facc15', roughness: 0.45 });
     const seatMat = new THREE.MeshStandardMaterial({ color: '#ec4899', roughness: 0.72 });
+    const shirtMat = riderMats.shirts[Math.floor(Math.random() * riderMats.shirts.length)];
+    const lungiMat = riderMats.lungis[Math.floor(Math.random() * riderMats.lungis.length)];
 
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(1.14, 0.48, 0.84), seatMat);
-    seat.position.set(0, 0.74, 0.42);
+    // Tubular chassis + front fork neck + rear axle beam
+    const stem = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 1.38), pool.bumperDarkMat);
+    stem.position.set(0, 0.54, -0.3);
+    const downTube = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.74, 6), pool.bumperDarkMat);
+    downTube.position.set(0, 0.72, -0.76);
+    downTube.rotation.x = 0.58;
+    const fork = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.028, 0.72, 6), pool.chromeMat);
+    fork.position.set(0, 0.66, -0.94);
+    fork.rotation.x = -0.2;
+    const rearAxle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.18, 6), pool.bumperDarkMat);
+    rearAxle.rotation.z = Math.PI / 2;
+    rearAxle.position.set(0, 0.38, 0.56);
+
+    // Passenger seat + footrest + armrests
+    const seatBase = new THREE.Mesh(new THREE.BoxGeometry(1.14, 0.46, 0.82), seatMat);
+    seatBase.position.set(0, 0.72, 0.44);
+    const backrest = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.54, 0.14), seatMat);
+    backrest.position.set(0, 1.06, 0.78);
+    const footrest = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.06, 0.34), pool.bumperDarkMat);
+    footrest.position.set(0, 0.48, -0.02);
+
+    // Multi-rib pleated rickshaw hood
     const hood = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.64, 0.64, 1.18, 10, 1, false, 0, Math.PI),
+      new THREE.CylinderGeometry(0.64, 0.64, 1.18, 12, 1, false, 0, Math.PI),
       hoodMat
     );
     hood.rotation.z = Math.PI / 2;
-    hood.position.set(0, 1.34, 0.48);
+    hood.position.set(0, 1.32, 0.48);
     hood.castShadow = true;
 
-    const hoodBand = new THREE.Mesh(new THREE.BoxGeometry(1.22, 0.14, 0.14), trimMat);
-    hoodBand.position.set(0, 1.38, 1.05);
+    const hoodBand = new THREE.Mesh(new THREE.BoxGeometry(1.22, 0.12, 0.14), trimMat);
+    hoodBand.position.set(0, 1.35, 1.08);
+    const hoodVisor = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.1, 0.16), trimMat);
+    hoodVisor.position.set(0, 1.38, -0.14);
+    hoodVisor.rotation.x = 0.25;
 
-    // Colorful painted Bangla rickshaw-art back panel
+    // Colorful painted Bangla rickshaw-art back panel + decorative frame
     const artMat =
       pool.rickshawArtMats[Math.floor(Math.random() * pool.rickshawArtMats.length)];
-    const artPlate = new THREE.Mesh(new THREE.PlaneGeometry(1.08, 0.44), artMat);
-    artPlate.position.set(0, 0.75, 0.86);
+    const artFrame = new THREE.Mesh(new THREE.BoxGeometry(1.14, 0.52, 0.05), trimMat);
+    artFrame.position.set(0, 0.74, 0.85);
+    const artPlate = new THREE.Mesh(new THREE.PlaneGeometry(1.06, 0.44), artMat);
+    artPlate.position.set(0, 0.74, 0.885);
 
-    const stem = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 1.4), pool.bumperDarkMat);
-    stem.position.set(0, 0.58, -0.3);
+    // Rear tail light / reflector + side corner reflectors
+    const reflector = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.09, 0.06), tailMat);
+    reflector.position.set(0, 0.46, 0.88);
 
-    const riderBody = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.2, 0.24, 0.65, 8),
-      new THREE.MeshStandardMaterial({ color: '#38bdf8', roughness: 0.8 })
+    // Puller saddle + leaning puller body + arms + head
+    const saddle = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.08, 0.24), pool.tireMat);
+    saddle.position.set(0, 0.94, -0.44);
+    const pullerPelvis = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.22), lungiMat);
+    pullerPelvis.position.set(0, 0.98, -0.44);
+    const pullerTorso = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.46, 0.22), shirtMat);
+    pullerTorso.position.set(0, 1.24, -0.5);
+    pullerTorso.rotation.x = -0.26;
+    const pullerHead = new THREE.Mesh(new THREE.SphereGeometry(0.145, 8, 8), riderMats.skin);
+    pullerHead.position.set(0, 1.56, -0.58);
+
+    [-0.18, 0.18].forEach((ax) => {
+      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.032, 0.46, 6), riderMats.skin);
+      arm.position.set(ax, 1.24, -0.72);
+      arm.rotation.x = Math.PI / 2 - 0.35;
+      bodyGroup.add(arm);
+    });
+
+    // Animated pedaling crank + articulated legs (thighs + knees + shins + feet)
+    const crankPivot = new THREE.Group();
+    crankPivot.position.set(0, 0.44, -0.56);
+    const crankGear = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.03, 10), pool.chromeMat);
+    crankGear.rotation.z = Math.PI / 2;
+    const crankArmL = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.18, 0.04), pool.chromeMat);
+    crankArmL.position.set(-0.11, -0.08, 0);
+    const crankArmR = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.18, 0.04), pool.chromeMat);
+    crankArmR.position.set(0.11, 0.08, 0);
+    const pedalL = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.03, 0.08), pool.tireMat);
+    pedalL.position.set(-0.15, -0.17, 0);
+    const pedalR = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.03, 0.08), pool.tireMat);
+    pedalR.position.set(0.15, 0.17, 0);
+    crankPivot.add(crankGear, crankArmL, crankArmR, pedalL, pedalR);
+
+    const buildLeg = (sideX: number) => {
+      const hipPivot = new THREE.Group();
+      hipPivot.position.set(sideX, 0.9, -0.45);
+      const thigh = new THREE.Mesh(geos.limbThigh, lungiMat);
+      const kneePivot = new THREE.Group();
+      kneePivot.position.set(0, -0.27, 0);
+      const shin = new THREE.Mesh(geos.limbShin, riderMats.skin);
+      const foot = new THREE.Mesh(geos.footGeo, pool.tireMat);
+      foot.position.set(0, -0.28, -0.04);
+      kneePivot.add(shin, foot);
+      hipPivot.add(thigh, kneePivot);
+      bodyGroup.add(hipPivot);
+      return { hipPivot, kneePivot };
+    };
+    const legL = buildLeg(-0.13);
+    const legR = buildLeg(0.13);
+
+    bodyGroup.add(
+      stem,
+      downTube,
+      fork,
+      rearAxle,
+      seatBase,
+      backrest,
+      footrest,
+      hood,
+      hoodBand,
+      hoodVisor,
+      artFrame,
+      artPlate,
+      reflector,
+      saddle,
+      pullerPelvis,
+      pullerTorso,
+      pullerHead,
+      crankPivot
     );
-    riderBody.position.set(0, 1.1, -0.58);
-    const riderHead = new THREE.Mesh(
-      new THREE.SphereGeometry(0.16, 8, 8),
-      new THREE.MeshStandardMaterial({ color: '#a16207', roughness: 0.72 })
-    );
-    riderHead.position.set(0, 1.56, -0.58);
 
-    // Rear small taillight reflector
-    const reflector = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.08, 0.05), tailMat);
-    reflector.position.set(0, 0.5, 0.86);
+    // LOD <= 40m: handlebars, brass bell, gamchha scarf, hood ribs, mudguards, seated passengers
+    const handlebar = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.05, 0.05), pool.chromeMat);
+    handlebar.position.set(0, 1.16, -0.92);
+    const bellCap = new THREE.Mesh(new THREE.SphereGeometry(0.038, 6, 6), trimMat);
+    bellCap.position.set(0.24, 1.2, -0.92);
+    const gamchha = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.12, 0.25), riderMats.gamchhaRed);
+    gamchha.position.set(0, 1.4, -0.53);
+    gamchha.rotation.x = -0.2;
 
-    bodyGroup.add(seat, hood, hoodBand, artPlate, stem, riderBody, riderHead, reflector);
+    // Decorative brass/gold hood ribs along pleated canopy
+    [-0.18, 0.25, 0.68].forEach((rz) => {
+      const rib = new THREE.Mesh(
+        new THREE.TorusGeometry(0.64, 0.018, 5, 12, Math.PI),
+        trimMat
+      );
+      rib.rotation.y = Math.PI / 2;
+      rib.position.set(0, 1.32, rz);
+      detailGroup.add(rib);
+    });
 
-    // LOD <= 40m: handlebars, mirror, seated passengers, hood side trims
-    const handlebar = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.07, 0.07), pool.chromeMat);
-    handlebar.position.set(0, 1.15, -0.92);
+    // Rear mudguards over rear spoked wheels
+    [-0.58, 0.58].forEach((mx) => {
+      const guard = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.42, 0.42, 0.11, 8, 1, false, -Math.PI * 0.4, Math.PI * 0.8),
+        hoodMat
+      );
+      guard.rotation.z = Math.PI / 2;
+      guard.position.set(mx, 0.38, 0.56);
+      detailGroup.add(guard);
+    });
+
     const passL = new THREE.Mesh(
-      new THREE.BoxGeometry(0.32, 0.44, 0.24),
-      new THREE.MeshStandardMaterial({ color: '#f97316', roughness: 0.8 })
+      new THREE.BoxGeometry(0.32, 0.42, 0.24),
+      riderMats.shirts[1]
     );
-    passL.position.set(-0.24, 1.14, 0.48);
+    passL.position.set(-0.24, 1.12, 0.48);
     const passR = new THREE.Mesh(
-      new THREE.BoxGeometry(0.32, 0.44, 0.24),
-      new THREE.MeshStandardMaterial({ color: '#14b8a6', roughness: 0.8 })
+      new THREE.BoxGeometry(0.32, 0.42, 0.24),
+      riderMats.shirts[2]
     );
-    passR.position.set(0.24, 1.14, 0.48);
-    detailGroup.add(handlebar, passL, passR);
+    passR.position.set(0.24, 1.12, 0.48);
+    detailGroup.add(handlebar, bellCap, gamchha, passL, passR);
 
-    addWheel(0, 0.36, -0.95, geos.tireMoto, geos.rimMoto, pool.chromeMat, true);
-    addWheel(-0.56, 0.36, 0.55, geos.tireMoto, geos.rimMoto, pool.chromeMat, true);
-    addWheel(0.56, 0.36, 0.55, geos.tireMoto, geos.rimMoto, pool.chromeMat, true);
+    // Spinning spoked wheels (8 thin chrome spokes visible <= 40m in wheelDetails)
+    const addSpokedRickshawWheel = (wx: number, wy: number, wz: number) => {
+      const w = new THREE.Group();
+      const tire = new THREE.Mesh(geos.tireRickshaw, pool.tireMat);
+      const rim = new THREE.Mesh(geos.rimRickshaw, pool.chromeMat);
+      const hub = new THREE.Mesh(geos.rickshawHub, pool.chromeMat);
+      w.add(tire, rim, hub);
+
+      for (let s = 0; s < 4; s++) {
+        const spoke = new THREE.Mesh(geos.rickshawSpoke, pool.chromeMat);
+        spoke.rotation.x = (s / 4) * Math.PI;
+        w.add(spoke);
+        wheelDetails.push(spoke);
+      }
+      w.position.set(wx, wy, wz);
+      group.add(w);
+      wheels.push(w);
+    };
+
+    addSpokedRickshawWheel(0, 0.38, -0.96);
+    addSpokedRickshawWheel(-0.58, 0.38, 0.56);
+    addSpokedRickshawWheel(0.58, 0.38, 0.56);
+
+    let pedalPhase = Math.random() * Math.PI * 2;
+    const animate = (dt: number, speed: number) => {
+      if (speed > 0.2) {
+        pedalPhase += (speed / wheelRadius) * dt * 0.85;
+      }
+      crankPivot.rotation.x = -pedalPhase;
+      const pL = pedalPhase;
+      const pR = pedalPhase + Math.PI;
+      legL.hipPivot.rotation.x = 0.54 + Math.sin(pL) * 0.42;
+      legL.kneePivot.rotation.x = -0.66 - Math.cos(pL) * 0.46;
+      legR.hipPivot.rotation.x = 0.54 + Math.sin(pR) * 0.42;
+      legR.kneePivot.rotation.x = -0.66 - Math.cos(pR) * 0.46;
+    };
 
     return {
       group,
       bodyGroup,
       detailGroup,
       wheelDetails,
-      halfWidth: 0.68,
-      halfLength: 1.2,
+      halfWidth: 0.7,
+      halfLength: 1.24,
       wheels,
       wheelRadius,
       setBraking,
       setTurnSignal,
+      animate,
     };
   }
 
   // =========================================================================
-  // 5. MOTORBIKES WITH RIDER AND PILLION
+  // 4B. TEMPO / LAGUNA (open back with hanging passengers, painted body, loud engine puff)
   // =========================================================================
-  if (kind === 'bike') {
-    wheelRadius = 0.34;
-    const bikeColors = ['#1d4ed8', '#18181b', '#dc2626', '#16a34a', '#ea580c'];
-    const tankMat = new THREE.MeshStandardMaterial({
-      color: bikeColors[Math.floor(Math.random() * bikeColors.length)],
-      roughness: 0.24,
-      metalness: 0.55,
-    });
-    const riderShirtMat = new THREE.MeshStandardMaterial({
-      color: Math.random() < 0.65 ? '#f97316' : '#1e293b',
-      roughness: 0.82,
-    });
-    const skinMat = new THREE.MeshStandardMaterial({ color: '#b45309', roughness: 0.75 });
-    const helmetMat = new THREE.MeshStandardMaterial({
-      color: Math.random() < 0.5 ? '#18181b' : '#facc15',
-      roughness: 0.24,
-      metalness: 0.35,
-    });
+  if (kind === 'tempo') {
+    wheelRadius = 0.32;
+    const tempoMat =
+      pool.tempoArtMats[Math.floor(Math.random() * pool.tempoArtMats.length)];
+    const roofTrimMat = new THREE.MeshStandardMaterial({ color: '#fef08a', roughness: 0.55 });
+    const seatMat = new THREE.MeshStandardMaterial({ color: '#7c2d12', roughness: 0.82 });
 
-    const chassis = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.36, 1.32), pool.bumperDarkMat);
-    chassis.position.set(0, 0.58, 0);
-    const tank = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.25, 0.54), tankMat);
-    tank.position.set(0, 0.88, -0.24);
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.16, 0.74), pool.tireMat);
-    seat.position.set(0, 0.82, 0.32);
-
-    const hl = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), pool.headlightLensMat);
-    hl.position.set(0, 0.92, -0.74);
-    const tl = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.06), tailMat);
-    tl.position.set(0, 0.82, 0.74);
-
-    const riderTorso = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.56, 0.26), riderShirtMat);
-    riderTorso.position.set(0, 1.18, 0.06);
-    riderTorso.rotation.x = -0.24;
-    const riderHead = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 10), helmetMat);
-    riderHead.position.set(0, 1.56, -0.02);
-
-    // Pillion passenger seated behind rider
-    const pillionTorso = new THREE.Mesh(
-      new THREE.BoxGeometry(0.36, 0.52, 0.24),
-      new THREE.MeshStandardMaterial({
-        color: Math.random() < 0.5 ? '#eab308' : '#0284c7',
-        roughness: 0.85,
-      })
+    // Tapered front cab + windshield + single bright headlight + dark bumper
+    const cab = new THREE.Mesh(geos.tempoCab, tempoMat);
+    cab.castShadow = true;
+    const ws = new THREE.Mesh(new THREE.BoxGeometry(1.24, 0.5, 0.06), pool.tintedGlassMat);
+    ws.position.set(0, 1.42, -1.16);
+    ws.rotation.x = -0.45;
+    const frontFender = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.16, 0.55), pool.bumperDarkMat);
+    frontFender.position.set(0, 0.54, -1.46);
+    const frontBumper = new THREE.Mesh(new THREE.BoxGeometry(1.56, 0.18, 0.14), pool.bumperDarkMat);
+    frontBumper.position.set(0, 0.42, -1.75);
+    const frontHeadlight = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.11, 0.11, 0.08, 10),
+      pool.headlightLensMat
     );
-    pillionTorso.position.set(0, 1.16, 0.44);
-    pillionTorso.rotation.x = -0.14;
-    const pillionHead = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), skinMat);
-    pillionHead.position.set(0, 1.52, 0.4);
+    frontHeadlight.rotation.x = Math.PI / 2;
+    frontHeadlight.position.set(0, 0.82, -1.74);
 
-    bodyGroup.add(chassis, tank, seat, hl, tl, riderTorso, riderHead, pillionTorso, pillionHead);
+    // Open-back passenger compartment: floor, painted lower side walls, longitudinal benches, roof & grab bars
+    const bedFloor = new THREE.Mesh(new THREE.BoxGeometry(1.64, 0.12, 1.88), pool.bumperDarkMat);
+    bedFloor.position.set(0, 0.44, 0.68);
+    const sideWallL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.72, 1.88), tempoMat);
+    sideWallL.position.set(-0.78, 0.84, 0.68);
+    sideWallL.castShadow = true;
+    const sideWallR = sideWallL.clone();
+    sideWallR.position.x = 0.78;
+    sideWallR.castShadow = true;
 
-    // LOD <= 40m: forks, handlebar, mirrors, muffler, Bangla rear plate, turn indicators
-    const fork = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.68, 8), pool.chromeMat);
-    fork.position.set(0, 0.68, -0.64);
-    fork.rotation.x = -0.32;
-    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.05, 0.06), pool.chromeMat);
-    handle.position.set(0, 1.04, -0.52);
-    const muffler = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.065, 0.72, 8), pool.chromeMat);
-    muffler.rotation.x = Math.PI / 2;
-    muffler.position.set(0.22, 0.44, 0.44);
-    const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.12), pickPrivPlate());
-    plate.position.set(0, 0.68, 0.76);
-    const indL = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 6), leftIndMat);
-    indL.position.set(-0.16, 0.82, 0.72);
-    const indR = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 6), rightIndMat);
-    indR.position.set(0.16, 0.82, 0.72);
-    detailGroup.add(fork, handle, muffler, plate, indL, indR);
-    addSideMirrors(0.28, 1.1, -0.52, 0.55);
+    const benchL = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.14, 1.72), seatMat);
+    benchL.position.set(-0.56, 0.68, 0.66);
+    const benchR = benchL.clone();
+    benchR.position.x = 0.56;
 
-    addWheel(0, 0.34, -0.7, geos.tireMoto, geos.rimMoto, pool.alloyRimMat, true);
-    addWheel(0, 0.34, 0.64, geos.tireMoto, geos.rimMoto, pool.alloyRimMat, true);
+    // Rear metal canopy roof + open back frame pillars + step footboard
+    const roofCanopy = new THREE.Mesh(new THREE.BoxGeometry(1.66, 0.1, 2.02), pool.cngRoofCanvasMat);
+    roofCanopy.position.set(0, 1.86, 0.66);
+    roofCanopy.castShadow = true;
+    const rearRoofBand = new THREE.Mesh(new THREE.BoxGeometry(1.68, 0.12, 0.1), roofTrimMat);
+    rearRoofBand.position.set(0, 1.82, 1.66);
+
+    [
+      [-0.78, 1.36, -0.18],
+      [0.78, 1.36, -0.18],
+      [-0.78, 1.36, 1.6],
+      [0.78, 1.36, 1.6],
+    ].forEach(([px, py, pz]) => {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.94, 6), pool.chromeMat);
+      post.position.set(px, py, pz);
+      bodyGroup.add(post);
+    });
+
+    const rearStep = new THREE.Mesh(new THREE.BoxGeometry(1.56, 0.12, 0.24), pool.bumperDarkMat);
+    rearStep.position.set(0, 0.4, 1.68);
+
+    // Driver silhouette inside front cab
+    const driverBody = new THREE.Mesh(
+      new THREE.BoxGeometry(0.38, 0.48, 0.22),
+      riderMats.shirts[0]
+    );
+    driverBody.position.set(0, 1.0, -0.82);
+    const driverHead = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8), riderMats.skin);
+    driverHead.position.set(0, 1.32, -0.82);
+
+    // Prominent rear-left exhaust pipe (emits loud diesel puffs!)
+    const exhaustPipe = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.055, 0.065, 0.52, 8),
+      pool.bumperDarkMat
+    );
+    exhaustPipe.rotation.x = Math.PI / 2 + 0.12;
+    exhaustPipe.position.set(-0.56, 0.3, 1.64);
+
+    bodyGroup.add(
+      cab,
+      ws,
+      frontFender,
+      frontBumper,
+      frontHeadlight,
+      bedFloor,
+      sideWallL,
+      sideWallR,
+      benchL,
+      benchR,
+      roofCanopy,
+      rearRoofBand,
+      rearStep,
+      driverBody,
+      driverHead,
+      exhaustPipe
+    );
+    addCornerLightsAndPlates(0.84, -1.73, 1.66, 0.72, 0.54, true, false);
+
+    // LOD <= 40m: mirrors, roof rack, inside seated pax, AND 2 passengers hanging off the open rear footboard
+    addSideMirrors(0.76, 1.32, -1.18, 0.95);
+    const roofRack = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.12, 1.68), pool.chromeMat);
+    roofRack.position.set(0, 1.97, 0.62);
+    detailGroup.add(roofRack);
+
+    // Side safety grab bars along open cabin
+    [-0.78, 0.78].forEach((sx) => {
+      const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.76, 6), pool.chromeMat);
+      bar.rotation.x = Math.PI / 2;
+      bar.position.set(sx, 1.34, 0.7);
+      detailGroup.add(bar);
+    });
+
+    // Seated passengers inside open cabin
+    [
+      [-0.45, 0.96, 0.35, 1],
+      [0.45, 0.96, 0.55, 3],
+      [-0.45, 0.96, 1.05, 4],
+    ].forEach(([px, py, pz, sIdx]) => {
+      const pTorso = new THREE.Mesh(
+        new THREE.BoxGeometry(0.28, 0.38, 0.22),
+        riderMats.shirts[sIdx % riderMats.shirts.length]
+      );
+      pTorso.position.set(px, py, pz);
+      const pHead = new THREE.Mesh(new THREE.SphereGeometry(0.125, 7, 7), riderMats.skin);
+      pHead.position.set(px, py + 0.28, pz);
+      detailGroup.add(pTorso, pHead);
+    });
+
+    // 2 Passengers hanging on the open back footboard holding the rear posts & roof rail
+    const hangingGroup = new THREE.Group();
+    [-0.48, 0.52].forEach((hx, idx) => {
+      const pax = new THREE.Group();
+      pax.position.set(hx, 0.46, 1.7);
+      const pants = new THREE.Mesh(
+        new THREE.BoxGeometry(0.26, 0.46, 0.2),
+        riderMats.pantsDark
+      );
+      pants.position.y = 0.24;
+      const shirt = new THREE.Mesh(
+        new THREE.BoxGeometry(0.3, 0.46, 0.22),
+        riderMats.shirts[(idx + 2) % riderMats.shirts.length]
+      );
+      shirt.position.set(0, 0.66, 0.05);
+      shirt.rotation.x = 0.16;
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.135, 8, 8), riderMats.skin);
+      head.position.set(0, 1.02, 0.1);
+      const grabArm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.036, 0.032, 0.48, 6),
+        riderMats.skin
+      );
+      grabArm.position.set(hx < 0 ? -0.14 : 0.14, 1.06, -0.05);
+      grabArm.rotation.x = -0.35;
+      pax.add(pants, shirt, head, grabArm);
+      hangingGroup.add(pax);
+    });
+    detailGroup.add(hangingGroup);
+
+    addWheel(0, 0.32, -1.28, geos.tireCng, geos.rimCng, pool.steelRimMat, true);
+    addWheel(-0.78, 0.32, 1.08, geos.tireCng, geos.rimCng, pool.steelRimMat, true);
+    addWheel(0.78, 0.32, 1.08, geos.tireCng, geos.rimCng, pool.steelRimMat, true);
+
+    let swayPhase = Math.random() * Math.PI * 2;
+    const animate = (dt: number, speed: number, leanAngle: number) => {
+      if (detailGroup.visible) {
+        swayPhase += dt * (3.5 + speed * 0.25);
+        hangingGroup.rotation.x = Math.sin(swayPhase) * 0.045;
+        hangingGroup.rotation.z = leanAngle * 0.65;
+      }
+    };
 
     return {
       group,
       bodyGroup,
       detailGroup,
       wheelDetails,
-      halfWidth: 0.42,
-      halfLength: 1.0,
+      halfWidth: 0.88,
+      halfLength: 1.75,
       wheels,
       wheelRadius,
+      hasExhaustPuffs: true,
+      exhaustLocalPos: { x: -0.56, y: 0.32, z: 1.74 },
       setBraking,
       setTurnSignal,
+      animate,
+    };
+  }
+
+  // =========================================================================
+  // 5. MOTORBIKES (rider with helmet, leaning in turns, glowing tail light)
+  // =========================================================================
+  if (kind === 'bike') {
+    wheelRadius = 0.34;
+    // Lean pivot wraps bodyGroup & wheels at ground y=0 so whole bike banks into turns
+    const leanGroup = new THREE.Group();
+    group.remove(bodyGroup);
+    leanGroup.add(bodyGroup);
+    group.add(leanGroup);
+
+    const bikeColors = ['#1d4ed8', '#18181b', '#dc2626', '#16a34a', '#ea580c'];
+    const tankMat = new THREE.MeshStandardMaterial({
+      color: bikeColors[Math.floor(Math.random() * bikeColors.length)],
+      roughness: 0.22,
+      metalness: 0.58,
+      envMapIntensity: 1.35,
+    });
+    const riderShirtMat = riderMats.shirts[Math.floor(Math.random() * riderMats.shirts.length)];
+    const helmetMat = riderMats.helmets[Math.floor(Math.random() * riderMats.helmets.length)];
+
+    // Frame, finned engine block, sculpted fuel tank, stepped leather seat & cowling
+    const chassis = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.32, 1.24), pool.bumperDarkMat);
+    chassis.position.set(0, 0.56, 0);
+    const engineBlock = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.26, 0.34), pool.steelRimMat);
+    engineBlock.position.set(0, 0.46, -0.06);
+    const tank = new THREE.Mesh(geos.bikeTank, tankMat);
+    tank.castShadow = true;
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.76), pool.tireMat);
+    seat.position.set(0, 0.78, 0.34);
+    const rearCowl = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.14, 0.38), tankMat);
+    rearCowl.position.set(0, 0.76, 0.62);
+    const frontFender = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.36, 0.36, 0.14, 8, 1, false, -Math.PI * 0.38, Math.PI * 0.76),
+      tankMat
+    );
+    frontFender.rotation.z = Math.PI / 2;
+    frontFender.position.set(0, 0.36, -0.7);
+
+    // Front headlight + cowling + glowing red tail light (with additive glow sprite!)
+    const hl = new THREE.Mesh(new THREE.SphereGeometry(0.105, 8, 8), pool.headlightLensMat);
+    hl.position.set(0, 0.94, -0.76);
+    const frontVisor = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.18, 0.14), tankMat);
+    frontVisor.position.set(0, 1.0, -0.68);
+    frontVisor.rotation.x = -0.35;
+
+    const tl = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.09, 0.07), tailMat);
+    tl.position.set(0, 0.81, 0.8);
+    const tailGlowMat = new THREE.SpriteMaterial({
+      map: getLightGlowTex(),
+      color: '#ef4444',
+      transparent: true,
+      opacity: 0.42,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const tailGlow = new THREE.Sprite(tailGlowMat);
+    tailGlow.position.set(0, 0.81, 0.86);
+    tailGlow.scale.set(0.55, 0.44, 1);
+
+    // Rider with full-face helmet + visor + bent riding posture & legs
+    const riderTorso = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.54, 0.24), riderShirtMat);
+    riderTorso.position.set(0, 1.15, 0.04);
+    riderTorso.rotation.x = -0.3;
+
+    const helmetGroup = new THREE.Group();
+    helmetGroup.position.set(0, 1.52, -0.06);
+    const helmetShell = new THREE.Mesh(geos.helmetDome, helmetMat);
+    const helmetChin = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.12, 0.14), helmetMat);
+    helmetChin.position.set(0, -0.07, -0.1);
+    const helmetVisor = new THREE.Mesh(geos.helmetVisor, riderMats.helmetVisor);
+    helmetVisor.position.set(0, 0.02, -0.11);
+    const helmetStripe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.055, 0.24, 0.28),
+      riderMats.gamchhaRed
+    );
+    helmetStripe.position.set(0, 0.08, 0.02);
+    helmetGroup.add(helmetShell, helmetChin, helmetVisor, helmetStripe);
+
+    [-0.18, 0.18].forEach((sx) => {
+      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.032, 0.44, 6), riderShirtMat);
+      arm.position.set(sx, 1.14, -0.22);
+      arm.rotation.x = Math.PI / 2 - 0.36;
+      const thigh = new THREE.Mesh(geos.limbThigh, riderMats.pantsDark);
+      thigh.position.set(sx * 0.95, 0.82, 0.04);
+      thigh.rotation.x = 0.85;
+      const shin = new THREE.Mesh(geos.limbShin, riderMats.pantsDark);
+      shin.position.set(sx * 0.98, 0.64, -0.14);
+      shin.rotation.x = -0.22;
+      bodyGroup.add(arm, thigh, shin);
+    });
+
+    bodyGroup.add(
+      chassis,
+      engineBlock,
+      tank,
+      seat,
+      rearCowl,
+      frontFender,
+      hl,
+      frontVisor,
+      tl,
+      tailGlow,
+      riderTorso,
+      helmetGroup
+    );
+
+    // LOD <= 40m: forks, handlebar, mirrors, muffler, Bangla rear plate, indicators, optional pillion
+    const fork = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.68, 8), pool.chromeMat);
+    fork.position.set(0, 0.68, -0.62);
+    fork.rotation.x = -0.32;
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.045, 0.055), pool.chromeMat);
+    handle.position.set(0, 1.04, -0.5);
+    const muffler = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.065, 0.74, 8), pool.chromeMat);
+    muffler.rotation.x = Math.PI / 2 + 0.14;
+    muffler.position.set(0.2, 0.46, 0.46);
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.12), pickPrivPlate());
+    plate.position.set(0, 0.64, 0.81);
+    const indL = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 6), leftIndMat);
+    indL.position.set(-0.16, 0.81, 0.78);
+    const indR = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 6), rightIndMat);
+    indR.position.set(0.16, 0.81, 0.78);
+    detailGroup.add(fork, handle, muffler, plate, indL, indR);
+    addSideMirrors(0.28, 1.1, -0.5, 0.52);
+
+    if (Math.random() < 0.45) {
+      const pillionTorso = new THREE.Mesh(
+        new THREE.BoxGeometry(0.34, 0.48, 0.22),
+        riderMats.shirts[Math.floor(Math.random() * riderMats.shirts.length)]
+      );
+      pillionTorso.position.set(0, 1.12, 0.42);
+      pillionTorso.rotation.x = -0.16;
+      const pillionHead = new THREE.Mesh(new THREE.SphereGeometry(0.145, 8, 8), riderMats.skin);
+      pillionHead.position.set(0, 1.46, 0.38);
+      detailGroup.add(pillionTorso, pillionHead);
+    }
+
+    // Spoked motorcycle wheels attached inside leanGroup so wheels bank with frame!
+    const addBikeWheel = (wz: number) => {
+      const w = new THREE.Group();
+      const tire = new THREE.Mesh(geos.tireMoto, pool.tireMat);
+      const hub = new THREE.Mesh(geos.rimMoto, pool.alloyRimMat);
+      w.add(tire, hub);
+      for (let s = 0; s < 4; s++) {
+        const spoke = new THREE.Mesh(geos.motoSpoke, pool.chromeMat);
+        spoke.rotation.x = (s / 4) * Math.PI;
+        w.add(spoke);
+        wheelDetails.push(spoke);
+      }
+      w.position.set(0, 0.34, wz);
+      leanGroup.add(w);
+      wheels.push(w);
+    };
+    addBikeWheel(-0.7);
+    addBikeWheel(0.64);
+
+    const setBikeBraking = (braking: boolean) => {
+      setBraking(braking);
+      tailGlowMat.opacity = braking ? 0.92 : 0.4;
+    };
+
+    const animate = (dt: number, _speed: number, leanAngle: number) => {
+      const targetLean = THREE.MathUtils.clamp(leanAngle, -0.44, 0.44);
+      leanGroup.rotation.z = THREE.MathUtils.damp(leanGroup.rotation.z, targetLean, 11, dt);
+    };
+
+    return {
+      group,
+      bodyGroup,
+      detailGroup,
+      leanGroup,
+      wheelDetails,
+      halfWidth: 0.44,
+      halfLength: 1.04,
+      wheels,
+      wheelRadius,
+      setBraking: setBikeBraking,
+      setTurnSignal,
+      animate,
     };
   }
 

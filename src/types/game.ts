@@ -17,6 +17,7 @@ export type VehicleKind =
   | 'truck'
   | 'car'
   | 'rickshaw'
+  | 'tempo'
   | 'bike'
   | 'thelagari'
   | 'cng_ai';

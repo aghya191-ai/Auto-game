@@ -398,6 +398,7 @@ export interface VehicleAssetPool {
   localBusBodyMats: THREE.MeshStandardMaterial[];
   doubleDeckerBodyMat: THREE.MeshStandardMaterial;
   truckArtMats: THREE.MeshStandardMaterial[];
+  tempoArtMats: THREE.MeshStandardMaterial[];
   ambulanceSideMat: THREE.MeshStandardMaterial;
   rickshawArtMats: THREE.MeshBasicMaterial[];
 }
@@ -537,6 +538,31 @@ export function getVehicleAssetPool(maxAnisotropy: number): VehicleAssetPool {
       })
   );
 
+  const tempoConfigs = [
+    { bg: '#0d9488', stripe: '#facc15', route: 'আগ্রাবাদ — নিউমার্কেট' },
+    { bg: '#dc2626', stripe: '#fef08a', route: 'বহদ্দারহাট — জিইসি' },
+    { bg: '#2563eb', stripe: '#fb923c', route: 'চকবাজার — পতেঙ্গা' },
+    { bg: '#15803d', stripe: '#fde047', route: 'অলংকার — মুরাদপুর' },
+  ];
+  const tempoArtMats = tempoConfigs.map((cfg, idx) => {
+    const tex = finalizeTex(
+      createDirtPaintCanvas(cfg.bg, 7301 + idx * 59, {
+        stripeHex: cfg.stripe,
+        stripeY: 118,
+        stripeH: 26,
+        dents: true,
+        fade: true,
+        routeText: cfg.route,
+      }),
+      maxAnisotropy
+    );
+    return new THREE.MeshStandardMaterial({
+      map: tex,
+      roughness: 0.56,
+      metalness: 0.16,
+    });
+  });
+
   const ambulanceSideMat = new THREE.MeshStandardMaterial({
     map: createAmbulanceSideTexture(maxAnisotropy),
     roughness: 0.34,
@@ -574,6 +600,7 @@ export function getVehicleAssetPool(maxAnisotropy: number): VehicleAssetPool {
     localBusBodyMats,
     doubleDeckerBodyMat,
     truckArtMats,
+    tempoArtMats,
     ambulanceSideMat,
     rickshawArtMats,
   };
@@ -609,6 +636,10 @@ export function disposeVehicleAssetPool(): void {
   p.doubleDeckerBodyMat.map?.dispose();
   p.doubleDeckerBodyMat.dispose();
   for (const m of p.truckArtMats) {
+    m.map?.dispose();
+    m.dispose();
+  }
+  for (const m of p.tempoArtMats) {
     m.map?.dispose();
     m.dispose();
   }

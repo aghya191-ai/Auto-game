@@ -77,13 +77,14 @@ const _targetSunDir = new THREE.Vector3();
 const _camTargetPos = new THREE.Vector3();
 const _camLookAt = new THREE.Vector3();
 const _puffDummy = new THREE.Object3D();
+const _puffColor = new THREE.Color();
 const _dustDummy = new THREE.Object3D();
 const _debrisDummy = new THREE.Object3D();
 const _debrisColor = new THREE.Color();
 
 const LANES = [-6.0, -2.8, 2.8, 6.0];
 const RAIN_COUNT = 340;
-const PUFF_COUNT = 28;
+const PUFF_COUNT = 96;
 const DUST_COUNT = 44;
 const DEBRIS_COUNT = 76;
 const MAX_DETAILED_PEDESTRIANS = 25;
@@ -156,6 +157,7 @@ interface TrafficEntity {
   suddenStopCooldown: number;
   turnSignalDir: -1 | 0 | 1 | 2;
   isVipConvoy?: boolean;
+  puffTimer?: number;
 }
 
 interface PedestrianEntity {
@@ -827,12 +829,12 @@ export class GameEngine {
     this.scene.add(this.cngRig.group);
     this.syncCameraVisibility();
 
-    // Pooled CNG Boost Exhaust Puff InstancedMesh (Zero GC)
+    // Pooled CNG Boost & Tempo Exhaust Puff InstancedMesh (Zero GC)
     const puffGeo = new THREE.SphereGeometry(0.16, 7, 6);
     const puffMat = new THREE.MeshBasicMaterial({
-      color: '#e2e8f0',
+      color: '#ffffff',
       transparent: true,
-      opacity: 0.46,
+      opacity: 0.48,
       depthWrite: false,
     });
     this.exhaustMesh = new THREE.InstancedMesh(puffGeo, puffMat, PUFF_COUNT);
@@ -840,6 +842,7 @@ export class GameEngine {
     this.exhaustMesh.frustumCulled = false;
     _puffDummy.scale.setScalar(0);
     _puffDummy.updateMatrix();
+    _puffColor.set('#e2e8f0');
     this.puffPool = [];
     for (let i = 0; i < PUFF_COUNT; i++) {
       this.puffPool.push({
@@ -854,8 +857,12 @@ export class GameEngine {
         maxAge: 0.45,
       });
       this.exhaustMesh.setMatrixAt(i, _puffDummy.matrix);
+      this.exhaustMesh.setColorAt(i, _puffColor);
     }
     this.exhaustMesh.instanceMatrix.needsUpdate = true;
+    if (this.exhaustMesh.instanceColor) {
+      this.exhaustMesh.instanceColor.needsUpdate = true;
+    }
     this.scene.add(this.exhaustMesh);
 
     // Pooled Stumble/Fall Dust Burst InstancedMesh (Zero GC, No Gore)
@@ -1263,6 +1270,14 @@ export class GameEngine {
       isHigh ? RAIN_COUNT * 2 : Math.floor(RAIN_COUNT * 0.45) * 2
     );
     this.streetDressing?.applyQuality(quality);
+    const allowTrafficShadows = isHigh && !this.isSoftwareGl;
+    for (let i = 0; i < this.traffic.length; i++) {
+      this.traffic[i].rig.bodyGroup.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          obj.castShadow = allowTrafficShadows;
+        }
+      });
+    }
     this.emitHud();
   }
 
@@ -1662,29 +1677,60 @@ export class GameEngine {
     }
   }
 
-  private updateExhaustPuffs(dt: number, boosting: boolean): void {
+  private emitExhaustPuff(
+    x: number,
+    y: number,
+    z: number,
+    vx: number,
+    vy: number,
+    vz: number,
+    maxAge: number,
+    colorHex: string
+  ): void {
     if (!this.exhaustMesh) return;
-    let dirty = false;
+    const idx = this.puffCursor;
+    this.puffCursor = (this.puffCursor + 1) % PUFF_COUNT;
+    const puff = this.puffPool[idx];
+    puff.active = true;
+    puff.x = x;
+    puff.y = y;
+    puff.z = z;
+    puff.vx = vx;
+    puff.vy = vy;
+    puff.vz = vz;
+    puff.age = 0;
+    puff.maxAge = maxAge;
+    this.exhaustMesh.setColorAt(idx, _puffColor.set(colorHex));
+    if (this.exhaustMesh.instanceColor) {
+      this.exhaustMesh.instanceColor.needsUpdate = true;
+    }
+  }
 
+  private emitPlayerBoostPuffs(dt: number, boosting: boolean): void {
+    if (!this.exhaustMesh) return;
     if (boosting) {
       this.puffEmitAccum += dt;
       while (this.puffEmitAccum >= 0.032) {
         this.puffEmitAccum -= 0.032;
-        const puff = this.puffPool[this.puffCursor];
-        this.puffCursor = (this.puffCursor + 1) % PUFF_COUNT;
-        puff.active = true;
-        puff.x = this.playerX - 0.45 + (Math.random() - 0.5) * 0.08;
-        puff.y = 0.34 + (Math.random() - 0.5) * 0.06;
-        puff.z = 1.65;
-        puff.vx = (Math.random() - 0.5) * 0.7;
-        puff.vy = 0.55 + Math.random() * 0.55;
-        puff.vz = 3.8 + this.playerSpeed * 0.28 + Math.random() * 1.4;
-        puff.age = 0;
-        puff.maxAge = 0.36 + Math.random() * 0.16;
+        this.emitExhaustPuff(
+          this.playerX - 0.45 + (Math.random() - 0.5) * 0.08,
+          0.34 + (Math.random() - 0.5) * 0.06,
+          1.65,
+          (Math.random() - 0.5) * 0.7,
+          0.55 + Math.random() * 0.55,
+          3.8 + this.playerSpeed * 0.28 + Math.random() * 1.4,
+          0.36 + Math.random() * 0.16,
+          '#e2e8f0'
+        );
       }
     } else {
       this.puffEmitAccum = 0;
     }
+  }
+
+  private updateExhaustPuffs(dt: number): void {
+    if (!this.exhaustMesh) return;
+    let dirty = false;
 
     for (let i = 0; i < PUFF_COUNT; i++) {
       const p = this.puffPool[i];
@@ -1755,12 +1801,13 @@ export class GameEngine {
 
   private pickVehicleKind(): VehicleKind {
     const r = Math.random();
-    if (r < 0.19) return 'bus';
-    if (r < 0.34) return 'truck';
-    if (r < 0.52) return 'car';
-    if (r < 0.67) return 'bike';
-    if (r < 0.8) return 'cng_ai';
-    if (r < 0.91) return 'rickshaw';
+    if (r < 0.17) return 'bus';
+    if (r < 0.31) return 'truck';
+    if (r < 0.48) return 'car';
+    if (r < 0.63) return 'tempo';
+    if (r < 0.77) return 'bike';
+    if (r < 0.87) return 'cng_ai';
+    if (r < 0.95) return 'rickshaw';
     return 'thelagari';
   }
 
@@ -1784,21 +1831,30 @@ export class GameEngine {
         (t) => (t.kind === 'bus' || t.kind === 'truck') && Math.abs(t.z - forcedZ) < 18
       );
       if (heavyNearby.length >= 2) {
-        kind = Math.random() < 0.5 ? 'car' : 'cng_ai';
+        kind = Math.random() < 0.5 ? 'car' : 'tempo';
       }
     }
 
     const rig = createVehicleModel(kind, this.maxAnisotropy);
+    if (this.graphicsQuality === 'low' || this.isSoftwareGl) {
+      rig.bodyGroup.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          obj.castShadow = false;
+        }
+      });
+    }
     const direction: 1 | -1 = lane < 0 ? -1 : 1; // Left carriageway = oncoming traffic (উল্টো পথ)!
     const baseSpeed =
       kind === 'thelagari'
         ? 5.5 + Math.random() * 2.5
         : kind === 'rickshaw'
         ? 8 + Math.random() * 3
+        : kind === 'tempo'
+        ? 13 + Math.random() * 4
         : kind === 'cng_ai'
         ? 14 + Math.random() * 4
         : kind === 'bike'
-        ? 16 + Math.random() * 4
+        ? 16 + Math.random() * 4.5
         : kind === 'truck'
         ? 11 + Math.random() * 3.5
         : kind === 'bus'
@@ -1831,10 +1887,16 @@ export class GameEngine {
       bouncePhase: Math.random() * Math.PI * 2,
       driftPhase: Math.random() * Math.PI * 2,
       driftSpeed: 1.2 + Math.random() * 1.4,
-      driftAmp: kind === 'rickshaw' || kind === 'thelagari' ? 0.24 : 0.14,
+      driftAmp:
+        kind === 'rickshaw' || kind === 'thelagari'
+          ? 0.24
+          : kind === 'tempo' || kind === 'bike'
+          ? 0.18
+          : 0.13,
       suddenStopTimer: 0,
       suddenStopCooldown: 6 + Math.random() * 12,
       turnSignalDir: 0,
+      puffTimer: Math.random() * 0.08,
     });
   }
 
@@ -2444,6 +2506,12 @@ export class GameEngine {
             ? 'পেছনে বাস'
             : t.kind === 'truck'
             ? 'পেছনে ট্রাক'
+            : t.kind === 'tempo'
+            ? 'পেছনে টেম্পু'
+            : t.kind === 'bike'
+            ? 'পেছনে বাইক'
+            : t.kind === 'rickshaw'
+            ? 'পেছনে রিকশা'
             : t.kind === 'car'
             ? 'পেছনে গাড়ি'
             : 'পেছনে যান';
@@ -2840,7 +2908,7 @@ export class GameEngine {
         this.callbacks.onMissionProgress('boost_time', whole);
       }
     }
-    this.updateExhaustPuffs(dt, boosting);
+    this.emitPlayerBoostPuffs(dt, boosting);
 
     // Smooth Damped Steering, Body Lean, Front Wheel Turn & Cockpit Handlebar (Zero FPS Jitter)
     const steerInput = (this.input.right ? 1 : 0) - (this.input.left ? 1 : 0);
@@ -3458,11 +3526,19 @@ export class GameEngine {
     const playerHalfL = 1.38;
     const nowSec = performance.now() * 0.001;
     const blinkOn = Math.sin(nowSec * 18) > 0;
+    const tempoPuffInterval = this.graphicsQuality === 'high' ? 0.08 : 0.18;
+
+    let nearestRickshawDist = 999;
+    let nearestRickshawSpeed = 0;
+    let nearestTempoDist = 999;
+    let nearestTempoSpeed = 0;
+    let nearestBikeDist = 999;
+    let nearestBikeSpeed = 0;
 
     for (let i = this.traffic.length - 1; i >= 0; i--) {
       const t = this.traffic[i];
 
-      // Occasional sudden passenger/signal stops on buses, rickshaws & CNGs (at safe forward distance)
+      // Occasional sudden passenger/signal stops on buses, tempos, rickshaws & CNGs (at safe forward distance)
       if (t.suddenStopTimer > 0) {
         t.suddenStopTimer -= dt;
       } else {
@@ -3472,7 +3548,7 @@ export class GameEngine {
           t.direction === 1 &&
           t.z < -28 &&
           t.z > -75 &&
-          (t.kind === 'bus' || t.kind === 'cng_ai' || t.kind === 'rickshaw') &&
+          (t.kind === 'bus' || t.kind === 'tempo' || t.kind === 'cng_ai' || t.kind === 'rickshaw') &&
           Math.random() < 0.016
         ) {
           t.suddenStopTimer = 1.6 + Math.random() * 0.9;
@@ -3521,7 +3597,8 @@ export class GameEngine {
 
       // Overtaking slower vehicles ahead or occasional lane changes for agile vehicles
       t.laneTimer -= dt;
-      const canAgileChange = t.kind === 'car' || t.kind === 'bike' || t.kind === 'cng_ai';
+      const canAgileChange =
+        t.kind === 'car' || t.kind === 'bike' || t.kind === 'tempo' || t.kind === 'cng_ai';
       if (slowerAhead && t.direction === 1 && t.suddenStopTimer <= 0 && t.speed > 4 && canAgileChange) {
         const adjLane = Math.abs(t.targetX - 2.8) < 0.7 ? 6.0 : 2.8;
         const blocked = this.traffic.some(
@@ -3533,7 +3610,7 @@ export class GameEngine {
           if (!t.honked && Math.abs(t.z) < 42 && this.trafficHornCooldown <= 0) {
             t.honked = true;
             this.trafficHornCooldown = 1.3;
-            this.sound.playTrafficHornBurst('light', 2);
+            this.sound.playVehicleHorn(t.kind);
           }
         }
       } else if (t.speed > 4 && t.laneTimer <= 0 && canAgileChange) {
@@ -3548,7 +3625,7 @@ export class GameEngine {
           if (!t.honked && Math.abs(t.z) < 42 && this.trafficHornCooldown <= 0) {
             t.honked = true;
             this.trafficHornCooldown = 1.4;
-            this.sound.playTrafficHornBurst('light', 2);
+            this.sound.playVehicleHorn(t.kind);
           }
         }
       }
@@ -3575,8 +3652,7 @@ export class GameEngine {
         t.turnSignalDir = 0;
       }
 
-      // Honking bursts at player (wrong-way oncoming, fast car blocked from behind, or ambient horn)
-      const hornKind: 'heavy' | 'light' = t.kind === 'bus' || t.kind === 'truck' ? 'heavy' : 'light';
+      // Honking bursts at player (wrong-way oncoming, fast vehicle blocked from behind, or ambient horn)
       if (
         !t.honked &&
         t.direction === -1 &&
@@ -3587,7 +3663,7 @@ export class GameEngine {
       ) {
         t.honked = true;
         this.trafficHornCooldown = 1.1;
-        this.sound.playTrafficHornBurst(hornKind, 2);
+        this.sound.playVehicleHorn(t.kind);
       } else if (
         !t.honked &&
         t.direction === 1 &&
@@ -3599,11 +3675,24 @@ export class GameEngine {
       ) {
         t.honked = true;
         this.trafficHornCooldown = 1.25;
-        this.sound.playTrafficHornBurst(hornKind, 2);
+        this.sound.playVehicleHorn(t.kind);
       } else if (!t.honked && t.z > -32 && t.z < -6 && Math.random() < 0.008 && this.trafficHornCooldown <= 0) {
         t.honked = true;
         this.trafficHornCooldown = 1.6;
-        this.sound.playTrafficHornBurst(hornKind, 2);
+        this.sound.playVehicleHorn(t.kind);
+      }
+
+      // Track closest rickshaw, tempo & motorbike for proximity WebAudio engine sounds
+      const distPlayer = Math.hypot(t.x - this.playerX, t.z);
+      if (t.kind === 'rickshaw' && distPlayer < nearestRickshawDist) {
+        nearestRickshawDist = distPlayer;
+        nearestRickshawSpeed = t.speed;
+      } else if (t.kind === 'tempo' && distPlayer < nearestTempoDist) {
+        nearestTempoDist = distPlayer;
+        nearestTempoSpeed = t.speed;
+      } else if (t.kind === 'bike' && distPlayer < nearestBikeDist) {
+        nearestBikeDist = distPlayer;
+        nearestBikeSpeed = t.speed;
       }
 
       // 40m LOD: detailed mirrors, racks, grilles, wheel spokes, hanging passengers visible <= 40m
@@ -3621,7 +3710,7 @@ export class GameEngine {
         t.rig.setEmergencyPhase(nowSec * 12);
       }
 
-      // Suspension bounce, braking pitch & lateral cornering roll on bodyGroup (wheels stay grounded)
+      // Suspension bounce, braking pitch, turn leaning & custom vehicle animations (pedaling / banking / swaying)
       t.bouncePhase += dt * (4.0 + t.speed * 0.45);
       const roadVib = Math.min(0.045, 0.008 + t.speed * 0.0012);
       const bounceY = Math.sin(t.bouncePhase) * roadVib;
@@ -3634,8 +3723,43 @@ export class GameEngine {
         10,
         dt
       );
-      const steerLean = -(t.x - prevX) * 2.2 * t.direction;
-      t.rig.bodyGroup.rotation.z = THREE.MathUtils.damp(t.rig.bodyGroup.rotation.z, steerLean, 10, dt);
+      const lateralVel = (t.x - prevX) / Math.max(dt, 0.008);
+      const steerLean =
+        t.kind === 'bike'
+          ? THREE.MathUtils.clamp(-lateralVel * 0.12 * t.direction, -0.44, 0.44)
+          : -(t.x - prevX) * 2.2 * t.direction;
+      if (t.kind !== 'bike') {
+        t.rig.bodyGroup.rotation.z = THREE.MathUtils.damp(
+          t.rig.bodyGroup.rotation.z,
+          steerLean,
+          10,
+          dt
+        );
+      }
+      t.rig.animate?.(dt, t.speed, steerLean);
+
+      // Tempo loud engine smoke puffs (pooled InstancedMesh, throttled by graphicsQuality)
+      if (t.rig.hasExhaustPuffs && t.rig.exhaustLocalPos && t.z > -55 && t.z < 18 && t.speed > 0.4) {
+        t.puffTimer = (t.puffTimer ?? 0) + dt;
+        if (t.puffTimer >= tempoPuffInterval) {
+          t.puffTimer = 0;
+          const ex = t.rig.exhaustLocalPos;
+          const wx = t.x + ex.x * t.direction + (Math.random() - 0.5) * 0.07;
+          const wy = ex.y + Math.random() * 0.06;
+          const wz = t.z + ex.z * t.direction;
+          const vz = t.direction * (2.8 + t.speed * 0.22 + Math.random() * 1.1);
+          this.emitExhaustPuff(
+            wx,
+            wy,
+            wz,
+            (Math.random() - 0.5) * 0.55,
+            0.7 + Math.random() * 0.55,
+            vz,
+            0.48 + Math.random() * 0.2,
+            '#52525b'
+          );
+        }
+      }
 
       const wheelSpin = (t.speed * dt) / t.rig.wheelRadius;
       for (const w of t.rig.wheels) {
@@ -3674,6 +3798,8 @@ export class GameEngine {
               ? 4800
               : t.kind === 'car'
               ? 3500
+              : t.kind === 'tempo'
+              ? 2600
               : t.kind === 'cng_ai'
               ? 2200
               : t.kind === 'bike'
@@ -3722,6 +3848,17 @@ export class GameEngine {
         this.traffic.splice(i, 1);
       }
     }
+
+    this.updateExhaustPuffs(dt);
+    this.sound.updateTrafficAudio(
+      nearestRickshawDist,
+      nearestRickshawSpeed,
+      nearestTempoDist,
+      nearestTempoSpeed,
+      nearestBikeDist,
+      nearestBikeSpeed,
+      true
+    );
 
     // Spawn Pedestrians (maintain busy Chattogram street crowd)
     this.pedSpawnTimer -= dt;
@@ -4036,7 +4173,7 @@ export class GameEngine {
     this.cngRig.bodyGroup.rotation.z = Math.sin(t * 0.004) * 0.022;
     this.cngRig.ornamentPivot.rotation.z = Math.sin(t * 0.0045) * 0.14;
     this.cngRig.ornamentPivot.rotation.x = Math.cos(t * 0.0038) * 0.06;
-    this.updateExhaustPuffs(dt, false);
+    this.updateExhaustPuffs(dt);
   }
 
   private afterDraw(cb: () => void): void {
